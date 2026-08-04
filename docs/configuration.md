@@ -13,7 +13,7 @@ Three values, no install, no clone:
   "mcpServers": {
     "planka": {
       "command": "uvx",
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl", "planka-mcp"],
+      "args": ["--refresh-package", "planka-mcp", "--from", "https://github.com/KT-SPARKS/planka-mcp/releases/latest/download/planka_mcp-latest.tar.gz", "planka-mcp"],
       "env": {
         "PLANKA_BASE_URL": "https://planka.example.com",
         "PLANKA_EMAIL": "you@example.com",
@@ -24,7 +24,7 @@ Three values, no install, no clone:
 }
 ```
 
-`uvx` (part of [uv](https://docs.astral.sh/uv/)) downloads the wheel and runs it,
+`uvx` (part of [uv](https://docs.astral.sh/uv/)) downloads and runs the server,
 the way `npx` does for Node. Nothing else is required, and none of the variables
 below are mandatory.
 
@@ -44,12 +44,34 @@ Claude Code:
 claude mcp add planka \
   --env PLANKA_BASE_URL=https://planka.example.com \
   --env PLANKA_API_KEY=your-api-key \
-  -- uvx --from https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl planka-mcp
+  -- uvx --refresh-package planka-mcp --from https://github.com/KT-SPARKS/planka-mcp/releases/latest/download/planka_mcp-latest.tar.gz planka-mcp
 ```
 
 Check it worked by asking the agent to call `whoami`.
 
-## Windows
+## Staying up to date, or pinning
+
+| Goal | `args` |
+| --- | --- |
+| **Auto-update** on client restart | `["--refresh-package", "planka-mcp", "--from", "<latest URL>", "planka-mcp"]` |
+| **Pin** a known version | `["--from", "<that release's wheel URL>", "planka-mcp"]` |
+
+The `latest` URL is a stable link that GitHub resolves to the newest release:
+
+```
+https://github.com/KT-SPARKS/planka-mcp/releases/latest/download/planka_mcp-latest.tar.gz
+```
+
+`--refresh-package planka-mcp` matters. Without it `uv` serves its cached copy
+of that URL forever — the content behind the link changes, your install does
+not. The flag costs roughly a second at launch and only revalidates this one
+package, not its dependencies.
+
+Pinned installs use the versioned **wheel** from a specific release; the
+auto-updating link is an **sdist**, because a wheel filename must carry a real
+version number and so cannot be called `latest`.
+
+## Windows## Windows
 
 * The desktop app spawns the command directly, so `uvx` may not resolve from
   `PATH`. Use the full path with doubled backslashes:

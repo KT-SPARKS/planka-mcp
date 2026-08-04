@@ -174,7 +174,7 @@ values, restart:
   "mcpServers": {
     "planka": {
       "command": "uvx",
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl", "planka-mcp"],
+      "args": ["--refresh-package", "planka-mcp", "--from", "https://github.com/KT-SPARKS/planka-mcp/releases/latest/download/planka_mcp-latest.tar.gz", "planka-mcp"],
       "env": {
         "PLANKA_BASE_URL": "https://planka.example.com",
         "PLANKA_EMAIL": "you@example.com",
@@ -185,7 +185,12 @@ values, restart:
 }
 ```
 
-Or with an API key instead of a password (Planka: user settings → API key):
+That URL always resolves to the newest release, and `--refresh-package` makes
+`uv` check for a new build on every launch — so restarting your client is the
+whole update process. Drop the flag and you stay on whatever version you first
+downloaded, because `uv` caches by URL.
+
+Prefer an API key over a password (Planka: user settings → API key):
 
 ```json
       "env": {
@@ -197,7 +202,14 @@ Or with an API key instead of a password (Planka: user settings → API key):
 Claude Code, one line:
 
 ```bash
-claude mcp add planka --env PLANKA_BASE_URL=https://planka.example.com --env PLANKA_API_KEY=your-api-key -- uvx --from https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl planka-mcp
+claude mcp add planka --env PLANKA_BASE_URL=https://planka.example.com --env PLANKA_API_KEY=your-api-key -- uvx --refresh-package planka-mcp --from https://github.com/KT-SPARKS/planka-mcp/releases/latest/download/planka_mcp-latest.tar.gz planka-mcp
+```
+
+To pin a version instead, point at that release's wheel and drop the refresh
+flag:
+
+```json
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl", "planka-mcp"]
 ```
 
 That is the whole setup. Everything below is optional.
@@ -212,9 +224,9 @@ Two things trip up the Windows desktop app:
   `"command": "C:\\Users\\You\\AppData\\Local\\hermes\\bin\\uvx.exe"`.
   Find it with `where uvx`.
 * **`Git executable not found`** — an `env` block replaces the process
-  environment, so a `git+https://...` source cannot run git. The wheel URL above
-  needs no git and avoids this entirely. If you do want to install from source on
-  Windows, add `"PATH"` to the `env` block.
+  environment, so a `git+https://...` source cannot run git. The release URLs
+  above need no git and avoid this entirely. If you do want to install from
+  source on Windows, add `"PATH"` to the `env` block.
 
 Config lives at `%APPDATA%\Claude\claude_desktop_config.json`. Quit from the
 tray icon and reopen — closing the window does not restart the app.
@@ -246,11 +258,9 @@ this at an admin account.
 </details>
 
 <details>
-<summary>Pinning, source installs and development</summary>
+<summary>Source installs and development</summary>
 
-Release wheels are on the
-[releases page](https://github.com/KT-SPARKS/planka-mcp/releases); swap the URL
-to pin an older one. To run from source (needs git):
+From source (needs git available to the process):
 
 ```bash
 uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
