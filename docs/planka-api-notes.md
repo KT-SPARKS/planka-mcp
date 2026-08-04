@@ -68,8 +68,10 @@ rolling its own row back if a rival's row has an earlier `createdAt`.
 * `POST /access-tokens {emailOrUsername, password}` → `{"item": "<jwt>"}`. The
   JWT `sub` claim is the user id (used as a fallback if `/users/me` is absent).
   Observed lifetime on 2.4.1: one year.
-* `POST /users/{id}/api-key` mints a long-lived key; send it the same way, as
-  `Authorization: Bearer <key>`.
+* `POST /users/{id}/api-key` mints a long-lived key, returned **once** and never
+  retrievable again. It is **not** a bearer token: the spec's `apiKeyAuth` scheme
+  puts it in an `X-Api-Key` header. Sending a key as `Authorization: Bearer`
+  simply fails to authenticate (`client._auth_headers` picks the right one).
 * All errors come back as `{code, message, problems[]}`; the client folds those
   into one readable string.
 

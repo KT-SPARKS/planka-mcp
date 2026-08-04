@@ -102,6 +102,13 @@ class PlankaClient:
                 await self._login()
         return self._token  # type: ignore[return-value]
 
+    def _auth_headers(self, token: str) -> dict[str, str]:
+        """Planka takes an API key in `X-Api-Key`, but a login token as a bearer.
+        Sending a key as a bearer token silently fails to authenticate."""
+        if self._token_is_api_key:
+            return {"X-Api-Key": token}
+        return {"Authorization": f"Bearer {token}"}
+
     async def _reauth(self) -> None:
         if self._token_is_api_key:
             raise PlankaError("API key rejected by Planka (401)", status=401)
@@ -138,7 +145,7 @@ class PlankaClient:
                     path,
                     json=json_body,
                     params=params,
-                    headers={"Authorization": f"Bearer {token}"},
+                    headers=self._auth_headers(token),
                 )
             except httpx.HTTPError as exc:
                 if attempt == MAX_RETRIES - 1:
@@ -451,7 +458,7 @@ class PlankaClient:
                     "url": (None, url),
                     "name": (None, name),
                 },
-                headers={"Authorization": f"Bearer {token}"},
+                headers=self._auth_headers(token),
             )
         except httpx.HTTPError as exc:
             raise PlankaError(f"Network error attaching the link: {exc}") from exc

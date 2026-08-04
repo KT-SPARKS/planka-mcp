@@ -14,7 +14,10 @@ no `.env` file:
 uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
 ```
 
-Configuration comes from the environment, so a client config is the whole setup:
+Configuration comes from the environment, so a client config is the whole setup.
+Choose one credential style.
+
+**Option A — API key** (Planka: user settings → API key; shown once):
 
 ```bash
 claude mcp add planka \
@@ -22,6 +25,20 @@ claude mcp add planka \
   --env PLANKA_API_KEY=your-api-key \
   -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
 ```
+
+**Option B — email and password** (the server logs in and refreshes on `401`):
+
+```bash
+claude mcp add planka \
+  --env PLANKA_BASE_URL=https://planka.example.com \
+  --env PLANKA_EMAIL=agent@example.com \
+  --env PLANKA_PASSWORD=your-password \
+  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+```
+
+Set one or the other; `PLANKA_API_KEY` takes precedence if both are present.
+The two are sent differently on the wire — a key goes in `X-Api-Key`, a login
+token as `Authorization: Bearer` — which the client handles for you.
 
 Pin a release for reproducibility by appending a tag:
 
@@ -66,8 +83,8 @@ project content. Membership is what matters.
 | Variable | Meaning |
 | --- | --- |
 | `PLANKA_BASE_URL` | Root URL of your Planka. `/api` is appended if missing. **Required.** |
-| `PLANKA_API_KEY` | Long-lived key from the user's settings. Preferred. |
-| `PLANKA_EMAIL` / `PLANKA_PASSWORD` | Fallback. A token is fetched on demand and refreshed automatically on `401`. |
+| `PLANKA_API_KEY` | Long-lived key from the user's settings, sent as `X-Api-Key`. Preferred: revocable without changing the password. |
+| `PLANKA_EMAIL` / `PLANKA_PASSWORD` | Fallback. A token is fetched on demand, sent as `Authorization: Bearer`, and refreshed automatically on `401`. |
 
 Set the API key **or** the email/password pair, not both.
 
@@ -150,17 +167,38 @@ configured Planka account. Do not expose it to the internet as-is.
 
 Claude Code — see the one-liner in [Quick start](#quick-start--no-install).
 
-Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
+Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`) —
+with an API key:
 
 ```json
 {
   "mcpServers": {
     "planka": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp", "planka-mcp"],
+      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0", "planka-mcp"],
       "env": {
         "PLANKA_BASE_URL": "https://planka.example.com",
         "PLANKA_API_KEY": "your-api-key",
+        "PLANKA_BOARD_IDS": "1234567890123456789",
+        "PLANKA_ACT_AS": "worker"
+      }
+    }
+  }
+}
+```
+
+…or with email and password:
+
+```json
+{
+  "mcpServers": {
+    "planka": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0", "planka-mcp"],
+      "env": {
+        "PLANKA_BASE_URL": "https://planka.example.com",
+        "PLANKA_EMAIL": "agent@example.com",
+        "PLANKA_PASSWORD": "your-password",
         "PLANKA_BOARD_IDS": "1234567890123456789",
         "PLANKA_ACT_AS": "worker"
       }

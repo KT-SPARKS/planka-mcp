@@ -165,7 +165,12 @@ labels; refusal to self-remove or self-promote.
 
 ## Setup
 
-No install needed — `uvx` fetches and runs it like `npx` does for Node:
+No install needed — `uvx` fetches and runs it like `npx` does for Node. Pick one
+of the two credential styles.
+
+### Option A — API key (recommended)
+
+In Planka: user settings → API key. The key is shown once.
 
 ```bash
 claude mcp add planka \
@@ -174,14 +179,12 @@ claude mcp add planka \
   -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
 ```
 
-Or in `claude_desktop_config.json` / `.cursor/mcp.json`:
-
 ```json
 {
   "mcpServers": {
     "planka": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp", "planka-mcp"],
+      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0", "planka-mcp"],
       "env": {
         "PLANKA_BASE_URL": "https://planka.example.com",
         "PLANKA_API_KEY": "your-api-key",
@@ -193,10 +196,44 @@ Or in `claude_desktop_config.json` / `.cursor/mcp.json`:
 }
 ```
 
-Recommended: create a dedicated Planka user for the agent, add it to the boards
-it should touch as a `worker` (or `editor`), and generate an API key in its
-settings — rather than pointing this at your own admin account.
-`PLANKA_BOARD_IDS` hard-scopes it; `PLANKA_ACT_AS` caps what it may do.
+### Option B — email and password
+
+No key needed; the server logs in and refreshes the token itself on `401`.
+
+```bash
+claude mcp add planka \
+  --env PLANKA_BASE_URL=https://planka.example.com \
+  --env PLANKA_EMAIL=agent@example.com \
+  --env PLANKA_PASSWORD=your-password \
+  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+```
+
+```json
+{
+  "mcpServers": {
+    "planka": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0", "planka-mcp"],
+      "env": {
+        "PLANKA_BASE_URL": "https://planka.example.com",
+        "PLANKA_EMAIL": "agent@example.com",
+        "PLANKA_PASSWORD": "your-password",
+        "PLANKA_BOARD_IDS": "1234567890123456789",
+        "PLANKA_ACT_AS": "worker"
+      }
+    }
+  }
+}
+```
+
+Set one style or the other, not both — `PLANKA_API_KEY` wins if present. A key is
+preferable because it can be revoked without changing the account password, and
+it never puts a reusable login credential in a config file.
+
+Recommended either way: create a dedicated Planka user for the agent and add it
+to the boards it should touch as a `worker` (or `editor`), rather than pointing
+this at your own admin account. `PLANKA_BOARD_IDS` hard-scopes it;
+`PLANKA_ACT_AS` caps what it may do.
 
 **Full configuration reference — every environment variable, status mapping,
 development checkout, HTTP transport — is in

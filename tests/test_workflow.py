@@ -282,3 +282,15 @@ def test_the_only_delete_tool_is_the_guarded_one():
     for expected in ("list_actionable_tasks", "claim_task", "assign_people",
                      "set_project_members", "manage_labels", "whoami"):
         assert expected in names
+
+
+def test_api_keys_and_login_tokens_use_different_headers():
+    from planka_mcp.client import PlankaClient
+    from planka_mcp.config import Config
+
+    keyed = PlankaClient(Config(base_url="https://x.test", api_key="secret-key"))
+    assert keyed._auth_headers("secret-key") == {"X-Api-Key": "secret-key"}
+
+    logged_in = PlankaClient(Config(base_url="https://x.test", email="a@b.c",
+                                    password="pw"))
+    assert logged_in._auth_headers("jwt-token") == {"Authorization": "Bearer jwt-token"}
