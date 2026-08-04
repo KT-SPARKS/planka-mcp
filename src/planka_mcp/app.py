@@ -66,6 +66,10 @@ Answering questions about the workspace:
 * `find_tasks` searches every project you can see, including other people's work -
   by text, assignee ("me", "unassigned" or a name), status, label or overdue. Use
   it for "what is Ada working on", "what is overdue", "where is the login card".
+  Searching for a person covers all three ways work reaches them: the task itself,
+  a checklist item assigned to them, and being mentioned in a comment. Report what
+  `matched_by` says rather than assuming they own the whole task - being mentioned
+  is not the same as being assigned.
   `list_actionable_tasks` is narrower on purpose: it is only your own ready queue.
 
 Managing a project:
@@ -100,7 +104,7 @@ mcp = MCPServer(
     "planka-tasks",
     title="Planka task queue",
     instructions=INSTRUCTIONS,
-    version="0.1.2",
+    version="0.1.3",
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)

@@ -24,7 +24,7 @@ The tools speak your words, not Planka's schema:
 | Tool | Purpose |
 | --- | --- |
 | `list_actionable_tasks` | Pre-filtered queue of genuinely ready work, most urgent first |
-| `find_tasks` | Search every project — other people's work included — by text, assignee, status, label or overdue |
+| `find_tasks` | Search every project — other people's work included — by text, assignee, status, label or overdue. A person's results cover task assignment, checklist items **and** comment mentions |
 | `claim_task` / `release_task` | Atomic claim; `already_taken` on a race |
 | `get_task` | Full detail of a chosen task |
 | `update_status` | `todo → in_progress → review → done`, illegal jumps rejected |
@@ -209,7 +209,7 @@ To pin a version instead, point at that release's wheel and drop the refresh
 flag:
 
 ```json
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl", "planka-mcp"]
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.3/planka_mcp-0.1.3-py3-none-any.whl", "planka-mcp"]
 ```
 
 That is the whole setup. Everything below is optional.

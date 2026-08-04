@@ -440,6 +440,11 @@ async def find_tasks(
     include_done: Annotated[
         bool, Field(description="Include finished work. Off by default.")
     ] = False,
+    include_mentions: Annotated[
+        bool,
+        Field(description="When searching for a person, also return tasks where they "
+                          "were mentioned in a comment. On by default."),
+    ] = True,
     limit: Annotated[
         int, Field(description="Maximum results (1-100).", ge=1, le=100)
     ] = 25,
@@ -448,7 +453,12 @@ async def find_tasks(
 
     Unlike `list_actionable_tasks`, which is your own ready-to-work queue, this
     answers questions about the whole workspace: what is Ada working on, what is
-    overdue, where did that card about the login bug go. Results are read-only
+    overdue, where did that card about the login bug go.
+
+    Searching for a person finds all three ways work reaches them: tasks they are
+    assigned to, tasks holding a checklist item assigned to them, and tasks where
+    they were mentioned in a comment. Each result says which, in `matched_by`,
+    and carries the specific checklist items and mentions. Results are read-only
     context; claiming and editing still go through the usual tools, and other
     people's tasks remain off limits to edit.
     """
@@ -511,13 +521,23 @@ async def find_tasks(
     needle = (text or "").lower().strip()
     wanted_label = (label or "").lower().strip()
 
-    matches: list[dict[str, Any]] = []
+    views: list[BoardView] = []
     unreachable: list[str] = []
     for key, payload in zip(board_ids, payloads):
         if isinstance(payload, BaseException):
             unreachable.append(str(key))
             continue
-        view = BoardView(payload, config.status_lists)
+        views.append(BoardView(payload, config.status_lists))
+
+    # A person's work reaches them three ways: the card itself, a checklist item
+    # assigned to them, or being mentioned in a comment. Searching only card
+    # assignment misses most of it.
+    mentions_by_card: dict[str, list[dict[str, Any]]] = {}
+    if wanted_user and include_mentions:
+        mentions_by_card = await _scan_mentions(client, views, wanted_user)
+
+    matches: list[dict[str, Any]] = []
+    for view in views:
         for card_id, card in view.cards.items():
             card_status = view.status_of_card(card)
             if status and card_status != status:
@@ -526,10 +546,25 @@ async def find_tasks(
                 continue
 
             members = view.members_of_card.get(card_id, [])
-            if assignee_mode == "unassigned" and members:
-                continue
-            if wanted_user and wanted_user not in members:
-                continue
+            their_subtasks = [
+                t for t in view.tasks_of_card.get(card_id, [])
+                if wanted_user and str(t.get("assigneeUserId") or "") == wanted_user
+            ]
+            their_mentions = mentions_by_card.get(card_id, [])
+
+            matched_by: list[str] = []
+            if assignee_mode == "unassigned":
+                if members:
+                    continue
+            elif wanted_user:
+                if wanted_user in members:
+                    matched_by.append("assigned to the task")
+                if their_subtasks:
+                    matched_by.append("assigned a checklist item")
+                if their_mentions:
+                    matched_by.append("mentioned in a comment")
+                if not matched_by:
+                    continue
 
             labels = [l.lower() for l in view.labels_of_card.get(card_id, [])]
             if wanted_label and wanted_label not in labels:
@@ -547,6 +582,15 @@ async def find_tasks(
 
             item["status"] = card_status or "not a work stage"
             item["url"] = f"{config.base_url.rstrip('/')}/cards/{card_id}"
+            if matched_by:
+                item["matched_by"] = matched_by
+            if their_subtasks:
+                item["their_checklist_items"] = [
+                    {"name": t.get("name"), "done": bool(t.get("isCompleted"))}
+                    for t in their_subtasks
+                ]
+            if their_mentions:
+                item["mentions"] = their_mentions
             matches.append(item)
 
     matches.sort(key=sort_key)
@@ -564,6 +608,17 @@ async def find_tasks(
         },
         "tasks": [_clean(m) for m in matches[:limit]],
     }
+    if wanted_user:
+        result["how_they_are_involved"] = {
+            "assigned to the task": sum(
+                1 for m in matches if "assigned to the task" in m.get("matched_by", [])),
+            "assigned a checklist item": sum(
+                1 for m in matches if "assigned a checklist item" in m.get("matched_by", [])),
+            "mentioned in a comment": sum(
+                1 for m in matches if "mentioned in a comment" in m.get("matched_by", [])),
+            "checklist items total": sum(
+                len(m.get("their_checklist_items", [])) for m in matches),
+        }
     if len(matches) > limit:
         result["note"] = (
             f"Showing {limit} of {len(matches)}; narrow the filters or raise limit."
@@ -571,3 +626,44 @@ async def find_tasks(
     if unreachable:
         result["unreachable_projects"] = unreachable
     return result
+
+
+async def _scan_mentions(
+    client: Any, views: list[BoardView], user_id: str
+) -> dict[str, list[dict[str, Any]]]:
+    """Find comments mentioning one person.
+
+    Planka writes a mention as `@[Display Name](userId)`, so the id is matched
+    rather than the name - a rename cannot break it. Only cards reporting
+    `commentsTotal > 0` are fetched, which keeps this to a handful of requests.
+    """
+    targets: list[tuple[BoardView, str]] = [
+        (view, card_id)
+        for view in views
+        for card_id, card in view.cards.items()
+        if card.get("commentsTotal")
+    ]
+    if not targets:
+        return {}
+
+    async def comments_for(card_id: str) -> list[dict[str, Any]]:
+        try:
+            return await client.comments(card_id)
+        except PlankaError:
+            return []
+
+    fetched = await asyncio.gather(*(comments_for(cid) for _, cid in targets))
+    marker = f"]({user_id})"
+    found: dict[str, list[dict[str, Any]]] = {}
+    for (view, card_id), comments in zip(targets, fetched):
+        for comment in comments:
+            text = comment.get("text") or ""
+            if marker not in text:
+                continue
+            author = (view.users.get(str(comment.get("userId"))) or {}).get("name")
+            found.setdefault(card_id, []).append({
+                "by": author,
+                "at": comment.get("createdAt"),
+                "text": text[:300],
+            })
+    return found

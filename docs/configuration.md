@@ -271,6 +271,22 @@ An ambiguous name is refused with the candidates listed, never guessed. Results
 carry a `url` to open the card. Scanning is one request per project, cached
 briefly, so a workspace with dozens of projects stays responsive.
 
+### Searching for a person
+
+Work reaches someone three ways, and `assignee` finds all of them:
+
+| `matched_by` | Meaning |
+| --- | --- |
+| `assigned to the task` | they are a member of the card |
+| `assigned a checklist item` | a checklist item on the card is assigned to them, even if the card itself is not |
+| `mentioned in a comment` | someone wrote `@[Their Name](id)` in a comment |
+
+Each result carries the specific `their_checklist_items` and `mentions`, and the
+response summarises the split under `how_they_are_involved`. Mentions match on
+**user id**, not display name, so renaming a person does not break history. Set
+`include_mentions: false` to skip the comment scan — it only reads cards that
+report having comments, so it is usually a handful of extra requests.
+
 ## Checking it works
 
 Ask the agent to call `whoami` — it reports the account, its instance role, the

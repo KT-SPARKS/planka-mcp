@@ -366,3 +366,67 @@ def test_find_tasks_caps_results_and_says_so():
     result = run(S.find_tasks(include_done=True, limit=1))
     assert result["count"] == 1 and result["total_matches"] > 1
     assert "narrow the filters" in result["note"]
+
+
+def _involve(fake):
+    """Give c3 a checklist item assigned to ADA and a comment mentioning GRACE."""
+    fake.task_lists.append({"id": "tl-x", "cardId": "c3", "name": "Checklist"})
+    fake.tasks.append({"id": "t-x", "taskListId": "tl-x", "name": "run the migration",
+                       "assigneeUserId": ADA, "isCompleted": False})
+    fake.cards["c3"]["commentsTotal"] = 1
+    fake.comment_store["c3"] = [
+        {"id": "cm1", "userId": OTHER,
+         "text": f"@[Someone Renamed]({GRACE}) can you take a look?"}
+    ]
+
+
+def test_find_tasks_sees_checklist_assignments_not_just_card_membership():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    _involve(fake)
+
+    result = run(S.find_tasks(assignee="Ada", include_done=True))
+    assert _titles(result) == {"Shipped"}          # c3, where ADA holds no card membership
+    task = result["tasks"][0]
+    assert task["matched_by"] == ["assigned a checklist item"]
+    assert task["their_checklist_items"] == [{"name": "run the migration", "done": False}]
+    assert result["how_they_are_involved"]["checklist items total"] == 1
+
+
+def test_find_tasks_matches_mentions_by_user_id_so_renames_cannot_break_them():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    _involve(fake)
+
+    result = run(S.find_tasks(assignee="Grace", include_done=True))
+    # the comment spells a different display name; the id is what matches
+    assert _titles(result) == {"Shipped"}
+    task = result["tasks"][0]
+    assert task["matched_by"] == ["mentioned in a comment"]
+    assert task["mentions"][0]["by"] == "Human"
+    assert result["how_they_are_involved"]["mentioned in a comment"] == 1
+
+
+def test_find_tasks_can_skip_the_comment_scan():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    _involve(fake)
+    quiet = run(S.find_tasks(assignee="Grace", include_done=True, include_mentions=False))
+    assert quiet["total_matches"] == 0
+
+
+def test_find_tasks_reports_every_way_a_person_is_involved():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    # ADA holds the card, a checklist item on it, and is mentioned on it
+    fake.memberships.append({"cardId": "c1", "userId": ADA, "createdAt": "2026-01-01"})
+    fake.task_lists.append({"id": "tl-y", "cardId": "c1", "name": "Checklist"})
+    fake.tasks.append({"id": "t-y", "taskListId": "tl-y", "name": "write it",
+                       "assigneeUserId": ADA, "isCompleted": True})
+    fake.cards["c1"]["commentsTotal"] = 1
+    fake.comment_store["c1"] = [{"id": "cm2", "userId": OTHER, "text": f"ping @[A]({ADA})"}]
+
+    task = run(S.find_tasks(assignee="ada@example.test"))["tasks"][0]
+    assert task["matched_by"] == ["assigned to the task", "assigned a checklist item",
+                                  "mentioned in a comment"]
+    assert task["their_checklist_items"] == [{"name": "write it", "done": True}]
