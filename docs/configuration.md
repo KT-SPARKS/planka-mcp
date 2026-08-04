@@ -71,7 +71,7 @@ Pinned installs use the versioned **wheel** from a specific release; the
 auto-updating link is an **sdist**, because a wheel filename must carry a real
 version number and so cannot be called `latest`.
 
-## Windows## Windows
+## Windows
 
 * The desktop app spawns the command directly, so `uvx` may not resolve from
   `PATH`. Use the full path with doubled backslashes:
