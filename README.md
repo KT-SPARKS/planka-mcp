@@ -165,39 +165,42 @@ labels; refusal to self-remove or self-promote.
 
 ## Setup
 
-```bash
-git clone https://github.com/KT-SPARKS/planka-mcp.git
-cd planka-mcp
-uv venv && uv pip install -e .
-cp .env.example .env    # then fill in base URL + credentials
-.venv/bin/planka-mcp
-```
-
-Point a client at it:
+No install needed — `uvx` fetches and runs it like `npx` does for Node:
 
 ```bash
-claude mcp add planka -- /absolute/path/to/planka-mcp/.venv/bin/planka-mcp
+claude mcp add planka \
+  --env PLANKA_BASE_URL=https://planka.example.com \
+  --env PLANKA_API_KEY=your-api-key \
+  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
 ```
 
-**Full configuration reference — every environment variable, the recommended
-dedicated-agent setup, status mapping and client config — is in
+Or in `claude_desktop_config.json` / `.cursor/mcp.json`:
+
+```json
+{
+  "mcpServers": {
+    "planka": {
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp", "planka-mcp"],
+      "env": {
+        "PLANKA_BASE_URL": "https://planka.example.com",
+        "PLANKA_API_KEY": "your-api-key",
+        "PLANKA_BOARD_IDS": "1234567890123456789",
+        "PLANKA_ACT_AS": "worker"
+      }
+    }
+  }
+}
+```
+
+Recommended: create a dedicated Planka user for the agent, add it to the boards
+it should touch as a `worker` (or `editor`), and generate an API key in its
+settings — rather than pointing this at your own admin account.
+`PLANKA_BOARD_IDS` hard-scopes it; `PLANKA_ACT_AS` caps what it may do.
+
+**Full configuration reference — every environment variable, status mapping,
+development checkout, HTTP transport — is in
 [docs/configuration.md](docs/configuration.md).**
-
-The short version: create a Planka user for the agent, add it to the boards it
-should touch as a `worker` (or `editor`), generate an API key in its settings,
-and set:
-
-```bash
-PLANKA_BASE_URL=https://planka.example.com
-PLANKA_API_KEY=your-api-key
-PLANKA_BOARD_IDS=1234567890123456789   # optional but recommended: hard scope
-PLANKA_ACT_AS=worker                   # optional: cap the agent below its account
-```
-
-For remote use set `PLANKA_TRANSPORT=http` (StreamableHTTP on
-`PLANKA_HTTP_HOST:PLANKA_HTTP_PORT`, endpoint `/mcp`). Note that HTTP mode has no
-authentication of its own — anyone who can reach the port acts as the configured
-Planka account, so keep it on a trusted network or behind a tunnel.
 
 ## Notes on the live API
 

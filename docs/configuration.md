@@ -4,26 +4,46 @@ Everything is read from environment variables — from a `.env` file next to the
 package, or from the `env` block of your MCP client's config. No secret is ever
 hardcoded, and `.env` is git-ignored.
 
-## Quick start
+## Quick start — no install
+
+`uvx` (shipped with [uv](https://docs.astral.sh/uv/)) fetches, builds and runs the
+server in one step, the way `npx` does for Node. Nothing to clone, no virtualenv,
+no `.env` file:
+
+```bash
+uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+```
+
+Configuration comes from the environment, so a client config is the whole setup:
+
+```bash
+claude mcp add planka \
+  --env PLANKA_BASE_URL=https://planka.example.com \
+  --env PLANKA_API_KEY=your-api-key \
+  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+```
+
+Pin a release for reproducibility by appending a tag:
+
+```
+git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0
+```
+
+Without `uv`, `pipx run --spec git+https://github.com/KT-SPARKS/planka-mcp planka-mcp`
+does the same thing.
+
+## From a checkout (for development)
 
 ```bash
 git clone https://github.com/KT-SPARKS/planka-mcp.git
 cd planka-mcp
 uv venv && uv pip install -e .
-cp .env.example .env
-```
-
-Fill in three things and you are running:
-
-```bash
-PLANKA_BASE_URL=https://planka.example.com
-PLANKA_EMAIL=agent@example.com
-PLANKA_PASSWORD=your-password
-```
-
-```bash
+cp .env.example .env      # fill in base URL + credentials
 .venv/bin/planka-mcp
 ```
+
+A `.env` file is only read in this mode; with `uvx` pass the values as `env` in
+your client config.
 
 ## Recommended setup: a dedicated agent account
 
@@ -128,11 +148,7 @@ configured Planka account. Do not expose it to the internet as-is.
 
 ## Connecting a client
 
-Claude Code:
-
-```bash
-claude mcp add planka -- /absolute/path/to/planka-mcp/.venv/bin/planka-mcp
-```
+Claude Code — see the one-liner in [Quick start](#quick-start--no-install).
 
 Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
 
@@ -140,7 +156,8 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
 {
   "mcpServers": {
     "planka": {
-      "command": "/absolute/path/to/planka-mcp/.venv/bin/planka-mcp",
+      "command": "uvx",
+      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp", "planka-mcp"],
       "env": {
         "PLANKA_BASE_URL": "https://planka.example.com",
         "PLANKA_API_KEY": "your-api-key",
@@ -150,6 +167,12 @@ Claude Desktop (`claude_desktop_config.json`) or Cursor (`.cursor/mcp.json`):
     }
   }
 }
+```
+
+Running from a checkout instead? Use the absolute path to the installed script:
+
+```json
+{ "command": "/absolute/path/to/planka-mcp/.venv/bin/planka-mcp" }
 ```
 
 ## Checking it works
