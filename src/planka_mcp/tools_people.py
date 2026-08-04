@@ -7,6 +7,8 @@ not, then assign them to the task - one call, all of it enforced server-side.
 
 from __future__ import annotations
 
+import asyncio
+import re
 from typing import Annotated, Any
 
 from pydantic import Field
@@ -22,8 +24,19 @@ from .app import (
     tool_result,
 )
 from .client import PlankaError
-from .domain import BoardView
+from .domain import DONE, BoardView
 from .roles import ASSIGN, BOARD_ROLES, INSTANCE_ROLES, PEOPLE
+
+# Planka writes a mention as `@[Display Name](userId)`.
+MENTION_RE = re.compile(r"@\[([^\]]*)\]\(([^)\s]+)\)")
+
+# Phrasing that turns a mention into a hand-off rather than a passing reference.
+HANDOFF_PHRASES = (
+    "assign", "assigned to", "assigning", "over to", "handing", "hand over",
+    "please", "can you", "could you", "take this", "take over", "your turn",
+    "to review", "to check", "to do", "for you", "ping", "own this", "owns this",
+    "responsible", "action", "follow up", "todo", "to-do",
+)
 
 
 async def _people_directory(client: Any, view: BoardView) -> list[dict[str, Any]]:
@@ -390,3 +403,136 @@ async def admin_manage_person(
 
     return {"ok": False, "error": "action must be set_instance_role, "
                                   "add_board_manager or create_person."}
+
+
+@mcp.tool(annotations=READ_ONLY)
+@tool_result
+async def find_informal_assignments(
+    project_id: Annotated[
+        str | None, Field(description="Check one project (tab) instead of all of them.")
+    ] = None,
+    board_id: Annotated[
+        str | None, Field(description="Check every project inside one board (container).")
+    ] = None,
+    include_any_mention: Annotated[
+        bool,
+        Field(description="Also report plain mentions with no hand-off wording. Off by "
+                          "default, which keeps this to comments that actually read like "
+                          "an assignment."),
+    ] = False,
+    include_done: Annotated[
+        bool, Field(description="Include finished tasks. Off by default.")
+    ] = False,
+    limit: Annotated[int, Field(description="Maximum findings (1-100).", ge=1, le=100)] = 25,
+) -> dict[str, Any]:
+    """Find work handed out in comments but never actually assigned.
+
+    Teams often hand off by writing "Assigned to: @[Name](id)" in a comment. In
+    Planka that is just text: the person is not a member of the task, so it never
+    reaches their queue, no board view shows them as owner, and it is invisible to
+    reporting. This reports every such comment where the mentioned person is not a
+    member of the task, and gives you the exact `assign_people` call that would
+    make it real. Read-only - it changes nothing on its own. Confirm with a human
+    before acting on findings; a mention is not always a hand-off.
+    """
+    config, client = await _get_client()
+
+    if project_id:
+        if not config.board_allowed(project_id):
+            return {"ok": False, "error": "That project is outside this server's allowlist."}
+        board_ids = [project_id]
+    elif board_id:
+        graph = await client.project_graph()
+        board_ids = [
+            str(b["id"]) for b in (graph.get("included") or {}).get("boards") or []
+            if str(b.get("projectId")) == board_id and config.board_allowed(str(b["id"]))
+        ]
+    else:
+        board_ids = [b for b in await client.board_ids() if config.board_allowed(b)]
+    if not board_ids:
+        return {"ok": True, "count": 0, "total_findings": 0, "scanned_projects": 0,
+                "findings": [], "note": "No projects in scope."}
+
+    payloads = await asyncio.gather(
+        *(client.board(b) for b in board_ids), return_exceptions=True
+    )
+    views = [
+        BoardView(p, config.status_lists) for p in payloads if not isinstance(p, BaseException)
+    ]
+
+    targets = [
+        (view, card_id)
+        for view in views
+        for card_id, card in view.cards.items()
+        if card.get("commentsTotal")
+        and (include_done or not (card.get("isClosed") or view.status_of_card(card) == DONE))
+    ]
+    if not targets:
+        return {"ok": True, "count": 0, "total_findings": 0,
+                "scanned_projects": len(views), "findings": [],
+                "note": "No commented tasks in scope."}
+
+    async def comments_for(card_id: str) -> list[dict[str, Any]]:
+        try:
+            return await client.comments(card_id)
+        except PlankaError:
+            return []
+
+    fetched = await asyncio.gather(*(comments_for(cid) for _, cid in targets))
+
+    findings: list[dict[str, Any]] = []
+    for (view, card_id), comments in zip(targets, fetched):
+        card = view.cards[card_id]
+        members = set(view.members_of_card.get(card_id, []))
+        seen: set[str] = set()
+        for comment in comments:
+            text = comment.get("text") or ""
+            mentioned = MENTION_RE.findall(text)
+            if not mentioned:
+                continue
+            lowered = text.lower()
+            reads_like_handoff = any(phrase in lowered for phrase in HANDOFF_PHRASES)
+            if not reads_like_handoff and not include_any_mention:
+                continue
+            for name, user_id in mentioned:
+                if user_id in members or user_id in seen:
+                    continue
+                seen.add(user_id)
+                findings.append({
+                    "task_id": card_id,
+                    "title": card.get("name"),
+                    "project": view.board_name,
+                    "project_id": view.board_id,
+                    "status": view.status_of_card(card) or "not a work stage",
+                    "person": {"user_id": user_id,
+                               "name": (view.users.get(user_id) or {}).get("name") or name},
+                    "said_by": (view.users.get(str(comment.get("userId"))) or {}).get("name"),
+                    "said_at": comment.get("createdAt"),
+                    "comment": text[:300],
+                    "reads_like_handoff": reads_like_handoff,
+                    "currently_assigned_to": [
+                        (view.users.get(m) or {}).get("name") or m for m in members
+                    ],
+                    "url": f"{config.base_url.rstrip('/')}/cards/{card_id}",
+                    "to_make_it_real": {
+                        "tool": "assign_people",
+                        "arguments": {"task_id": card_id, "people": [user_id]},
+                    },
+                })
+
+    findings.sort(key=lambda f: (not f["reads_like_handoff"], str(f["said_at"] or "")))
+    result: dict[str, Any] = {
+        "ok": True,
+        "count": min(len(findings), limit),
+        "total_findings": len(findings),
+        "scanned_projects": len(views),
+        "findings": findings[:limit],
+        "why_this_matters": "A mention is plain text. Until someone is a member of "
+                            "the task it stays out of their queue and out of any "
+                            "report of who is doing what.",
+        "next_step": "Check with a human before assigning - a mention can be a "
+                     "question rather than a hand-off. Then call assign_people.",
+    }
+    if len(findings) > limit:
+        result["note"] = f"Showing {limit} of {len(findings)}; narrow the scope or raise limit."
+    return result

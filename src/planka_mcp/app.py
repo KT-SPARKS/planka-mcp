@@ -87,6 +87,12 @@ People:
 * `assign_people` puts someone on a task and, if they are not on the project yet,
   adds them - as a worker unless told otherwise. Resolve ambiguity with
   `list_people` rather than guessing which person was meant.
+* Teams often hand work over by writing "Assigned to: @[Name](id)" in a comment.
+  In Planka that is only text - the person is not assigned, so the task never
+  reaches their queue and no report counts it as theirs. `find_informal_assignments`
+  lists those comments and the `assign_people` call that would make each one real.
+  Report them; do not assign on your own initiative, because a mention can be a
+  question rather than a hand-off. Ask the human first.
 * `set_project_members` changes who is on a project and the role they hold:
   worker, editor or guest.
 
@@ -104,7 +110,7 @@ mcp = MCPServer(
     "planka-tasks",
     title="Planka task queue",
     instructions=INSTRUCTIONS,
-    version="0.1.3",
+    version="0.1.4",
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)

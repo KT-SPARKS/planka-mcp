@@ -43,6 +43,7 @@ from .tools_manage import (  # noqa: F401
 from .tools_people import (  # noqa: F401
     admin_manage_person,
     assign_people,
+    find_informal_assignments,
     list_people,
     set_project_members,
     unassign_people,

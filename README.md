@@ -56,6 +56,7 @@ The tools speak your words, not Planka's schema:
 | `list_people` | Project members with roles, or the whole directory |
 | `assign_people` / `unassign_people` | Put people on a task, adding them to the project first |
 | `set_project_members` | Add, re-role (`worker`/`editor`/`guest`) or remove members |
+| `find_informal_assignments` | Work handed over in a comment but never actually assigned |
 | `admin_manage_person` | Instance roles and board managers — off unless enabled |
 
 Plus one prompt, **“Work through my task queue”**, as a one-click entry point.
@@ -209,7 +210,7 @@ To pin a version instead, point at that release's wheel and drop the refresh
 flag:
 
 ```json
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.3/planka_mcp-0.1.3-py3-none-any.whl", "planka-mcp"]
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.4/planka_mcp-0.1.4-py3-none-any.whl", "planka-mcp"]
 ```
 
 That is the whole setup. Everything below is optional.

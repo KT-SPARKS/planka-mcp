@@ -287,6 +287,31 @@ response summarises the split under `how_they_are_involved`. Mentions match on
 `include_mentions: false` to skip the comment scan — it only reads cards that
 report having comments, so it is usually a handful of extra requests.
 
+## Work handed over in comments
+
+A common habit is to hand a task over by writing a comment:
+
+```
+Assigned to: @[Ada Hopper](1234567890123456789)
+```
+
+Planka stores that as text. The person is **not** assigned: the task stays out of
+their queue, no board view shows them as owner, and nothing counts it as theirs.
+
+`find_informal_assignments` scans comments for mentions where the named person is
+not a member of the task, and returns the exact `assign_people` call that would
+make each one real. It changes nothing by itself.
+
+* Only comments with hand-off wording are reported by default
+  (`assigned`, `please`, `can you`, `over to`, `to review`, …). Pass
+  `include_any_mention: true` for every mention.
+* A mention of someone already assigned is not reported — that one is reconciled.
+* Finished tasks are skipped unless `include_done: true`.
+
+Treat findings as questions, not instructions: a mention can be "have a look at
+this" rather than "this is yours". The server tells the agent to confirm with a
+human before assigning.
+
 ## Checking it works
 
 Ask the agent to call `whoami` — it reports the account, its instance role, the

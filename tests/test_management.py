@@ -265,3 +265,67 @@ def test_system_lists_are_never_treated_as_work_stages():
     assert classify_list({"id": "x", "name": "To Do", "type": "active"}, {}, BOARD) == "todo"
     assert classify_list({"id": "x", "name": "Anything", "type": "closed"}, {}, BOARD) == "done"
     assert classify_list({"id": "x", "name": "On hold", "type": "waiting"}, {}, BOARD) is None
+
+
+# ------------------------------------------------- informal assignments
+
+
+def _comment_on(fake, card_id, text, by=OTHER):
+    fake.cards[card_id]["commentsTotal"] = fake.cards[card_id].get("commentsTotal", 0) + 1
+    fake.comment_store.setdefault(card_id, []).append(
+        {"id": f"cm{len(fake.comment_store.get(card_id, []))}", "userId": by, "text": text}
+    )
+
+
+def test_informal_assignment_is_found_when_the_person_is_not_a_member():
+    fake = setup_fake()
+    _comment_on(fake, "c1", f"Assigned to: @[Ada Hopper]({ADA})")
+
+    result = run(S.find_informal_assignments())
+    assert result["total_findings"] == 1
+    finding = result["findings"][0]
+    assert finding["person"]["user_id"] == ADA
+    assert finding["reads_like_handoff"] is True
+    assert finding["to_make_it_real"] == {
+        "tool": "assign_people", "arguments": {"task_id": "c1", "people": [ADA]}
+    }
+
+
+def test_a_mention_of_an_existing_member_is_not_a_finding():
+    fake = setup_fake()
+    # OTHER already holds c2, so naming them in a comment changes nothing
+    _comment_on(fake, "c2", f"Assigned to: @[Human]({OTHER})")
+    assert run(S.find_informal_assignments())["total_findings"] == 0
+
+
+def test_a_passing_mention_is_ignored_unless_asked_for():
+    fake = setup_fake()
+    _comment_on(fake, "c1", f"cc @[Ada Hopper]({ADA}) for visibility")
+
+    assert run(S.find_informal_assignments())["total_findings"] == 0
+    loose = run(S.find_informal_assignments(include_any_mention=True))
+    assert loose["total_findings"] == 1
+    assert loose["findings"][0]["reads_like_handoff"] is False
+
+
+def test_finished_work_is_skipped_by_default():
+    fake = setup_fake()
+    _comment_on(fake, "c3", f"please take this @[Ada Hopper]({ADA})")  # c3 is in Done
+    assert run(S.find_informal_assignments())["total_findings"] == 0
+    assert run(S.find_informal_assignments(include_done=True))["total_findings"] == 1
+
+
+def test_the_same_person_is_reported_once_per_task():
+    fake = setup_fake()
+    _comment_on(fake, "c1", f"please look @[Ada Hopper]({ADA})")
+    _comment_on(fake, "c1", f"@[Ada Hopper]({ADA}) can you take this")
+    assert run(S.find_informal_assignments())["total_findings"] == 1
+
+
+def test_the_scan_is_read_only():
+    fake = setup_fake()
+    _comment_on(fake, "c1", f"Assigned to: @[Ada Hopper]({ADA})")
+    before = list(fake.memberships), list(fake.board_memberships)
+    run(S.find_informal_assignments())
+    assert (fake.memberships, fake.board_memberships) == before
+    assert not any(c.startswith(("add_member", "add_membership")) for c in fake.calls)
