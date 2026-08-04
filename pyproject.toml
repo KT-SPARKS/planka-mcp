@@ -1,6 +1,6 @@
 [project]
 name = "planka-mcp"
-version = "0.1.1"
+version = "0.1.2"
 description = "MCP server that lets an AI agent autonomously pick up and complete work in Planka"
 readme = "README.md"
 requires-python = ">=3.10"

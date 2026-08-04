@@ -50,6 +50,7 @@ from .tools_people import (  # noqa: F401
 )
 from .tools_work import (  # noqa: F401
     add_comment,
+    find_tasks,
     add_result,
     claim_task,
     get_task,

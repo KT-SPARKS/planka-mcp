@@ -62,6 +62,12 @@ Doing work:
 4. Record output with `add_result` (and `attach_link` for anything living
    elsewhere) before marking it done. `release_task` hands work back.
 
+Answering questions about the workspace:
+* `find_tasks` searches every project you can see, including other people's work -
+  by text, assignee ("me", "unassigned" or a name), status, label or overdue. Use
+  it for "what is Ada working on", "what is overdue", "where is the login card".
+  `list_actionable_tasks` is narrower on purpose: it is only your own ready queue.
+
 Managing a project:
 * `list_projects` / `get_project` show structure, labels, members and the role
   you hold. Check `get_project` before changing anything.
@@ -94,7 +100,7 @@ mcp = MCPServer(
     "planka-tasks",
     title="Planka task queue",
     instructions=INSTRUCTIONS,
-    version="0.1.1",
+    version="0.1.2",
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)

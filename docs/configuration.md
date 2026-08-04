@@ -13,7 +13,7 @@ Three values, no install, no clone:
   "mcpServers": {
     "planka": {
       "command": "uvx",
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.1/planka_mcp-0.1.1-py3-none-any.whl", "planka-mcp"],
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl", "planka-mcp"],
       "env": {
         "PLANKA_BASE_URL": "https://planka.example.com",
         "PLANKA_EMAIL": "you@example.com",
@@ -44,7 +44,7 @@ Claude Code:
 claude mcp add planka \
   --env PLANKA_BASE_URL=https://planka.example.com \
   --env PLANKA_API_KEY=your-api-key \
-  -- uvx --from https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.1/planka_mcp-0.1.1-py3-none-any.whl planka-mcp
+  -- uvx --from https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.2/planka_mcp-0.1.2-py3-none-any.whl planka-mcp
 ```
 
 Check it worked by asking the agent to call `whoami`.
@@ -230,6 +230,24 @@ Running from a checkout instead? Use the absolute path to the installed script:
 ```json
 { "command": "/absolute/path/to/planka-mcp/.venv/bin/planka-mcp" }
 ```
+
+## Searching across projects
+
+`find_tasks` scans every project in scope rather than one board. Filters:
+
+| Argument | Example |
+| --- | --- |
+| `text` | `"login"` — matches title or description, case-insensitive |
+| `assignee` | `"Ada"`, an email, an id, `"me"`, `"unassigned"`, `"anyone"` |
+| `status` | `todo`, `in_progress`, `review`, `done` |
+| `label` | `"priority: high"` |
+| `overdue_only` | `true` — due date already passed |
+| `include_done` | `true` — finished work is excluded by default |
+| `project_id` / `board_id` | narrow to one tab, or one container |
+
+An ambiguous name is refused with the candidates listed, never guessed. Results
+carry a `url` to open the card. Scanning is one request per project, cached
+briefly, so a workspace with dozens of projects stays responsive.
 
 ## Checking it works
 

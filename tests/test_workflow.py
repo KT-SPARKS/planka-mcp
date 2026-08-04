@@ -294,3 +294,75 @@ def test_api_keys_and_login_tokens_use_different_headers():
     logged_in = PlankaClient(Config(base_url="https://x.test", email="a@b.c",
                                     password="pw"))
     assert logged_in._auth_headers("jwt-token") == {"Authorization": "Bearer jwt-token"}
+
+
+# ---------------------------------------------------------------- find_tasks
+
+
+def _titles(result):
+    return {t["title"] for t in result["tasks"]}
+
+
+def test_find_tasks_sees_other_peoples_work_unlike_the_queue():
+    setup_fake()
+    # the personal queue hides c2 because someone else holds it
+    assert _titles(run(S.list_actionable_tasks())) == {"Ready task"}
+    # search does not
+    assert "Someone else's" in _titles(run(S.find_tasks()))
+
+
+def test_find_tasks_filters_by_assignee_including_unassigned_and_me():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    run(S.claim_task("c1"))
+
+    mine = run(S.find_tasks(assignee="me"))
+    assert _titles(mine) == {"Ready task"}
+
+    theirs = run(S.find_tasks(assignee="Human"))
+    assert _titles(theirs) == {"Someone else's"}
+
+    nobody = run(S.find_tasks(assignee="unassigned"))
+    assert "Ready task" not in _titles(nobody) and "Someone else's" not in _titles(nobody)
+
+
+def test_find_tasks_refuses_an_ambiguous_person():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    result = run(S.find_tasks(assignee="Hopper"))
+    assert result["ok"] is False and result["result"] == "unresolved_assignee"
+    assert len(result["candidates"]) == 2
+
+
+def test_find_tasks_hides_done_work_unless_asked():
+    setup_fake()
+    assert "Shipped" not in _titles(run(S.find_tasks()))
+    assert "Shipped" in _titles(run(S.find_tasks(include_done=True)))
+    assert _titles(run(S.find_tasks(status="done"))) == {"Shipped"}
+
+
+def test_find_tasks_matches_text_and_label_and_reports_filters():
+    fake = setup_fake()
+    fake.card_labels.append({"cardId": "c1", "labelId": "lb1"})
+
+    assert _titles(run(S.find_tasks(text="do the thing"))) == {"Ready task"}  # description
+    assert _titles(run(S.find_tasks(text="READY"))) == {"Ready task"}         # title, any case
+    assert run(S.find_tasks(text="nothing here"))["total_matches"] == 0
+
+    labelled = run(S.find_tasks(label="priority: high"))
+    assert _titles(labelled) == {"Ready task"}
+    assert labelled["filters"]["label"] == "priority: high"
+
+
+def test_find_tasks_respects_the_board_allowlist():
+    setup_fake(board_ids=["some-other-board"])
+    scoped = run(S.find_tasks(project_id=BOARD))
+    assert scoped["ok"] is False and "allowlist" in scoped["error"]
+    assert run(S.find_tasks())["total_matches"] == 0  # nothing in scope to search
+
+
+def test_find_tasks_caps_results_and_says_so():
+    setup_fake()
+    result = run(S.find_tasks(include_done=True, limit=1))
+    assert result["count"] == 1 and result["total_matches"] > 1
+    assert "narrow the filters" in result["note"]

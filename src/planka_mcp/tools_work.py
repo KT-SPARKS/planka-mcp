@@ -408,3 +408,166 @@ async def release_task(
             "next_step": "Call list_actionable_tasks to pick different work."}
 
 
+@mcp.tool(annotations=READ_ONLY)
+@tool_result
+async def find_tasks(
+    text: Annotated[
+        str | None,
+        Field(description="Case-insensitive text to look for in the title or description."),
+    ] = None,
+    assignee: Annotated[
+        str | None,
+        Field(description="Whose work to show: a name, email or id; 'me'; 'anyone'; "
+                          "or 'unassigned'. Defaults to anyone."),
+    ] = None,
+    status: Annotated[
+        str | None,
+        Field(description="Restrict to todo, in_progress, review or done. "
+                          "Default: every stage except done."),
+    ] = None,
+    label: Annotated[
+        str | None, Field(description="Only tasks carrying this label, e.g. 'priority: high'.")
+    ] = None,
+    project_id: Annotated[
+        str | None, Field(description="Search one project (tab) instead of all of them.")
+    ] = None,
+    board_id: Annotated[
+        str | None, Field(description="Search every project inside one board (container).")
+    ] = None,
+    overdue_only: Annotated[
+        bool, Field(description="Only tasks whose due date has passed.")
+    ] = False,
+    include_done: Annotated[
+        bool, Field(description="Include finished work. Off by default.")
+    ] = False,
+    limit: Annotated[
+        int, Field(description="Maximum results (1-100).", ge=1, le=100)
+    ] = 25,
+) -> dict[str, Any]:
+    """Search tasks across every project you can see - including other people's.
+
+    Unlike `list_actionable_tasks`, which is your own ready-to-work queue, this
+    answers questions about the whole workspace: what is Ada working on, what is
+    overdue, where did that card about the login bug go. Results are read-only
+    context; claiming and editing still go through the usual tools, and other
+    people's tasks remain off limits to edit.
+    """
+    config, client = await _get_client()
+    my_id = await client.my_id()
+
+    # ---- which projects to scan
+    if project_id:
+        if not config.board_allowed(project_id):
+            return {"ok": False, "error": "That project is outside this server's allowlist."}
+        board_ids = [project_id]
+    elif board_id:
+        graph = await client.project_graph()
+        board_ids = [
+            str(b["id"]) for b in (graph.get("included") or {}).get("boards") or []
+            if str(b.get("projectId")) == board_id and config.board_allowed(str(b["id"]))
+        ]
+        if not board_ids:
+            return {"ok": False, "error": f"No projects found inside board {board_id}."}
+    else:
+        board_ids = [b for b in await client.board_ids() if config.board_allowed(b)]
+
+    # ---- who counts as the assignee
+    wanted_user: str | None = None
+    assignee_mode = "anyone"
+    if assignee and assignee.strip().lower() not in ("anyone", "any", "*", ""):
+        raw = assignee.strip().lower()
+        if raw in ("me", "myself"):
+            wanted_user, assignee_mode = my_id, "me"
+        elif raw in ("unassigned", "nobody", "none"):
+            assignee_mode = "unassigned"
+        else:
+            from .tools_people import _match_person, _person_brief
+
+            directory = []
+            try:
+                directory = await client.users()
+            except PlankaError:
+                pass
+            if not directory:
+                first = BoardView(await client.board(board_ids[0]), config.status_lists)
+                directory = list(first.users.values())
+            person, candidates = _match_person(assignee, directory)
+            if person is None:
+                return {
+                    "ok": False,
+                    "result": "unresolved_assignee",
+                    "asked_for": assignee,
+                    "candidates": [_person_brief(c) for c in candidates][:8],
+                    "next_step": "Call list_people for exact names, then retry.",
+                }
+            wanted_user, assignee_mode = str(person["id"]), person.get("name") or assignee
+
+    if status and status not in STATUSES:
+        return {"ok": False, "error": f"status must be one of {list(STATUSES)}."}
+
+    payloads = await asyncio.gather(
+        *(client.board(b) for b in board_ids), return_exceptions=True
+    )
+    needle = (text or "").lower().strip()
+    wanted_label = (label or "").lower().strip()
+
+    matches: list[dict[str, Any]] = []
+    unreachable: list[str] = []
+    for key, payload in zip(board_ids, payloads):
+        if isinstance(payload, BaseException):
+            unreachable.append(str(key))
+            continue
+        view = BoardView(payload, config.status_lists)
+        for card_id, card in view.cards.items():
+            card_status = view.status_of_card(card)
+            if status and card_status != status:
+                continue
+            if not status and not include_done and (card_status == DONE or card.get("isClosed")):
+                continue
+
+            members = view.members_of_card.get(card_id, [])
+            if assignee_mode == "unassigned" and members:
+                continue
+            if wanted_user and wanted_user not in members:
+                continue
+
+            labels = [l.lower() for l in view.labels_of_card.get(card_id, [])]
+            if wanted_label and wanted_label not in labels:
+                continue
+
+            item = view.summarize(card, my_id)
+            if needle and needle not in (
+                f"{item['title'] or ''} {card.get('description') or ''}".lower()
+            ):
+                continue
+            if overdue_only and not (
+                item["days_until_due"] is not None and item["days_until_due"] < 0
+            ):
+                continue
+
+            item["status"] = card_status or "not a work stage"
+            item["url"] = f"{config.base_url.rstrip('/')}/cards/{card_id}"
+            matches.append(item)
+
+    matches.sort(key=sort_key)
+    result: dict[str, Any] = {
+        "ok": True,
+        "count": min(len(matches), limit),
+        "total_matches": len(matches),
+        "searched_projects": len(board_ids),
+        "filters": {
+            "text": text,
+            "assignee": assignee_mode,
+            "status": status or ("any" if include_done else "anything but done"),
+            "label": label,
+            "overdue_only": overdue_only,
+        },
+        "tasks": [_clean(m) for m in matches[:limit]],
+    }
+    if len(matches) > limit:
+        result["note"] = (
+            f"Showing {limit} of {len(matches)}; narrow the filters or raise limit."
+        )
+    if unreachable:
+        result["unreachable_projects"] = unreachable
+    return result
