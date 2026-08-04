@@ -323,7 +323,9 @@ async def set_project_members(
 @tool_result
 async def admin_manage_person(
     action: Annotated[
-        str, Field(description="set_instance_role | create_person | add_board_manager.")
+        str,
+        Field(description="set_instance_role | add_board_manager | create_api_key | "
+                          "revoke_api_key | create_person."),
     ],
     person: Annotated[
         str | None,
@@ -341,9 +343,15 @@ async def admin_manage_person(
     name: Annotated[str | None, Field(description="Display name for create_person.")] = None,
 ) -> dict[str, Any]:
     """Instance-level administration: change someone's instance role, make someone
-    a manager of a board, or create a person. Off unless the operator sets
-    PLANKA_ALLOW_USER_ADMIN, and this server will never raise its own account's
-    role or hand out `admin`."""
+    a manager of a board, or mint and revoke API keys. Off unless the operator
+    sets PLANKA_ALLOW_USER_ADMIN, and this server will never raise its own
+    account's role or hand out `admin`.
+
+    `create_api_key` returns the key **once** - Planka cannot show it again, and
+    it replaces any key that account already had, breaking whatever was using it.
+    A key is a long-lived credential that acts as that person, and the value will
+    pass through this conversation and any transcript of it, so treat the output
+    as a secret and hand it over out of band. `revoke_api_key` clears one."""
     config, client = await _get_client()
     if not config.allow_user_admin:
         return {
@@ -389,6 +397,47 @@ async def admin_manage_person(
         return {"ok": True, "result": "manager_added" if status != 409 else "already_manager",
                 **_person_brief(resolved), "board_id": board_id}
 
+    if action in ("create_api_key", "revoke_api_key"):
+        if resolved is None:
+            return {"ok": False, "error": f"person is required for {action}."}
+        target_id = str(resolved["id"])
+        is_self = target_id == str(me.get("id"))
+        had_key = bool(resolved.get("apiKeyPrefix"))
+
+        if action == "revoke_api_key":
+            if is_self and config.api_key:
+                return {"ok": False, "result": "refused",
+                        "reason": "That is the key this server is authenticating with; "
+                                  "revoking it would cut off its own access."}
+            await client.revoke_api_key(target_id)
+            return {"ok": True, "result": "key_revoked", **_person_brief(resolved),
+                    "had_key": had_key,
+                    "note": "Anything using that key stops working immediately."}
+
+        if is_self and config.api_key:
+            return {"ok": False, "result": "refused",
+                    "reason": "Minting a key for this account would replace the key "
+                              "this server is authenticating with, cutting off its "
+                              "own access mid-session.",
+                    "next_step": "Mint it from an email/password session instead."}
+
+        _, key = await client.create_api_key(target_id)
+        if not key:
+            return {"ok": False, "error": "Planka returned no key."}
+        return {
+            "ok": True,
+            "result": "key_created",
+            **_person_brief(resolved),
+            "api_key": key,
+            "replaced_an_existing_key": had_key,
+            "warning": "Shown once and not retrievable again. This key acts as this "
+                       "person until revoked, and it is now in this conversation and "
+                       "any log of it - hand it over out of band and revoke it if the "
+                       "transcript is not trusted."
+            + (" It replaced their previous key, so anything using that has stopped "
+               "working." if had_key else ""),
+        }
+
     if action == "create_person":
         if not email or not name:
             return {"ok": False, "error": "email and name are required for create_person."}
@@ -401,8 +450,8 @@ async def admin_manage_person(
                          "set_project_members to put them on a project.",
         }
 
-    return {"ok": False, "error": "action must be set_instance_role, "
-                                  "add_board_manager or create_person."}
+    return {"ok": False, "error": "action must be set_instance_role, add_board_manager, "
+                                  "create_api_key, revoke_api_key or create_person."}
 
 
 @mcp.tool(annotations=READ_ONLY)

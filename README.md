@@ -57,7 +57,7 @@ The tools speak your words, not Planka's schema:
 | `assign_people` / `unassign_people` | Put people on a task, adding them to the project first |
 | `set_project_members` | Add, re-role (`worker`/`editor`/`guest`) or remove members |
 | `find_informal_assignments` | Work handed over in a comment but never actually assigned |
-| `admin_manage_person` | Instance roles and board managers — off unless enabled |
+| `admin_manage_person` | Instance roles, board managers, API key minting and revocation — off unless enabled |
 
 Plus one prompt, **“Work through my task queue”**, as a one-click entry point.
 
@@ -86,7 +86,8 @@ Planka has no status, priority or effort field, so the server derives them:
 * **Status = which list the card is in.** List names are matched by heuristic
   (`backlog`/`todo`/`ready` → `todo`, `doing`/`in progress`/`wip` →
   `in_progress`, `review`/`qa` → `review`, `done`/`closed` → `done`). Lists of
-  type `archive`/`trash` are ignored; type `closed` counts as done. Override the
+  type `waiting`/`inactive`, and Planka's own system lists, are outside the flow;
+  type `closed` counts as done. Override the
   mapping with `PLANKA_STATUS_LISTS` (see `.env.example`).
 * **Priority** comes from label conventions (`p0`/`urgent`/`critical` → urgent,
   `p1`/`high`, `p2`/`medium`, `p3`/`low`), defaulting to medium.
@@ -133,6 +134,10 @@ double-claim — the `409` makes that path genuinely atomic.
   cards; `manage_labels` refuses a label still on a card; there is no tool to
   delete a task, comment, project or board. Retiring a stage is a type change to
   `inactive`, which is reversible.
+* **Credentials are handled explicitly.** Minting an API key requires
+  `PLANKA_ALLOW_USER_ADMIN=true` plus an instance-admin account, reports whether
+  it replaced an existing key, and refuses to touch the key this server is itself
+  authenticating with.
 * **Other people's work is untouchable.** Editing, moving, relabelling or
   releasing a task claimed by someone else is refused.
 * **Claims are only ever for yourself.** `claim_task`/`release_task` take no user
@@ -155,7 +160,7 @@ double-claim — the `409` makes that path genuinely atomic.
 .venv/bin/python -m pytest tests -q
 ```
 
-43 offline tests run against an in-memory fake that reproduces Planka's
+65 offline tests run against an in-memory fake that reproduces Planka's
 semantics — assignment unique on card+user with `409` on re-insert, cards in a
 `closed` list finished by the server, board role separate from instance role.
 They cover: claim → idempotent re-claim → lost-race rollback; illegal
@@ -210,7 +215,7 @@ To pin a version instead, point at that release's wheel and drop the refresh
 flag:
 
 ```json
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.4/planka_mcp-0.1.4-py3-none-any.whl", "planka-mcp"]
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.5/planka_mcp-0.1.5-py3-none-any.whl", "planka-mcp"]
 ```
 
 That is the whole setup. Everything below is optional.

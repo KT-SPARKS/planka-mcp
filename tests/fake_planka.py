@@ -69,6 +69,7 @@ class FakePlanka:
              "role": "boardUser"},
         ]
         self.deleted: list[str] = []
+        self.minted = 0
         self.extra_lists: list[dict[str, Any]] = []
         self.hidden_lists: set[str] = set()
         self.calls: list[str] = []
@@ -298,6 +299,23 @@ class FakePlanka:
             if u["id"] == user_id:
                 u["role"] = role
                 self.calls.append(f"set_role:{user_id}:{role}")
+                return u
+        return {}
+
+    async def create_api_key(self, user_id):
+        self.calls.append(f"mint_key:{user_id}")
+        for u in self.directory:
+            if u["id"] == user_id:
+                self.minted += 1
+                u["apiKeyPrefix"] = f"pfx{self.minted}"
+                return u, f"secret-key-{self.minted}"
+        return {}, None
+
+    async def revoke_api_key(self, user_id):
+        self.calls.append(f"revoke_key:{user_id}")
+        for u in self.directory:
+            if u["id"] == user_id:
+                u["apiKeyPrefix"] = None
                 return u
         return {}
 

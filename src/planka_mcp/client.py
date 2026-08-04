@@ -430,6 +430,19 @@ class PlankaClient:
         )
         return body.get("item") or {}
 
+    async def create_api_key(self, user_id: str) -> tuple[dict[str, Any], str | None]:
+        """Mint an API key. Planka returns the value exactly once."""
+        _, body = await self.request("POST", f"/users/{user_id}/api-key")
+        included = body.get("included") or {}
+        return body.get("item") or {}, included.get("apiKey")
+
+    async def revoke_api_key(self, user_id: str) -> dict[str, Any]:
+        """Clear a user's API key. `PATCH /users/{id}` accepts apiKey: null."""
+        _, body = await self.request(
+            "PATCH", f"/users/{user_id}", json_body={"apiKey": None}
+        )
+        return body.get("item") or {}
+
     async def create_user(self, fields: dict[str, Any]) -> dict[str, Any]:
         _, body = await self.request("POST", "/users", json_body=fields)
         return body.get("item") or {}

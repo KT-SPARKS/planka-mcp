@@ -329,3 +329,55 @@ def test_the_scan_is_read_only():
     run(S.find_informal_assignments())
     assert (fake.memberships, fake.board_memberships) == before
     assert not any(c.startswith(("add_member", "add_membership")) for c in fake.calls)
+
+
+# ------------------------------------------------- API keys
+
+
+def test_minting_a_key_needs_user_admin_and_an_admin_account():
+    setup_fake()  # user admin off
+    off = run(S.admin_manage_person("create_api_key", person="Ada"))
+    assert off["result"] == "not_permitted"
+
+    fake = setup_fake(allow_user_admin=True)  # on, but the account is only boardUser
+    weak = run(S.admin_manage_person("create_api_key", person="Ada"))
+    assert weak["result"] == "not_permitted"
+    assert not any(c.startswith("mint_key") for c in fake.calls)
+
+
+def test_a_minted_key_is_returned_once_with_a_warning():
+    fake = setup_fake(allow_user_admin=True)
+    fake.instance_role = "admin"
+
+    result = run(S.admin_manage_person("create_api_key", person="Ada"))
+    assert result["result"] == "key_created"
+    assert result["api_key"] == "secret-key-1"
+    assert result["replaced_an_existing_key"] is False
+    assert "not retrievable again" in result["warning"]
+
+    # minting again replaces the previous key, and the response says so
+    again = run(S.admin_manage_person("create_api_key", person="Ada"))
+    assert again["replaced_an_existing_key"] is True
+    assert "stopped working" in again["warning"]
+
+
+def test_the_server_will_not_cut_off_its_own_key_auth():
+    fake = setup_fake(allow_user_admin=True)   # this config authenticates with an API key
+    fake.instance_role = "admin"
+
+    minting = run(S.admin_manage_person("create_api_key", person="agent@example.test"))
+    assert minting["result"] == "refused" and "own access" in minting["reason"]
+
+    revoking = run(S.admin_manage_person("revoke_api_key", person="agent@example.test"))
+    assert revoking["result"] == "refused"
+    assert not any(c.startswith(("mint_key", "revoke_key")) for c in fake.calls)
+
+
+def test_revoking_clears_the_key():
+    fake = setup_fake(allow_user_admin=True)
+    fake.instance_role = "admin"
+    run(S.admin_manage_person("create_api_key", person="Ada"))
+
+    result = run(S.admin_manage_person("revoke_api_key", person="Ada"))
+    assert result["result"] == "key_revoked" and result["had_key"] is True
+    assert next(u for u in fake.directory if u["id"] == ADA)["apiKeyPrefix"] is None

@@ -100,6 +100,9 @@ Your rights are checked per project and per action. `whoami` reports what this
 server may do. When a call comes back not_permitted, say so plainly - do not try
 to reach the same outcome another way.
 
+An API key is a credential that acts as a person. If you mint one, hand the value
+over deliberately and say plainly that it appears in this transcript.
+
 Rules enforced by this server: nothing that holds work is ever deleted, you can
 only claim or release tasks for yourself, a task claimed by someone else is never
 edited or moved, status transitions are validated, and instance-level user
@@ -110,7 +113,7 @@ mcp = MCPServer(
     "planka-tasks",
     title="Planka task queue",
     instructions=INSTRUCTIONS,
-    version="0.1.4",
+    version="0.1.5",
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)

@@ -143,7 +143,7 @@ from the URL when you open the tab in Planka.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `PLANKA_ACT_AS` | *(unset)* | Ceiling on what the agent may do: `guest`, `worker`, `editor` or `admin`. Lowers the account's real rights, never raises them. |
-| `PLANKA_ALLOW_USER_ADMIN` | `false` | Enables `admin_manage_person` (instance roles, board managers). Even when on, the server refuses to change its own account's role, grant instance `admin`, or create accounts. |
+| `PLANKA_ALLOW_USER_ADMIN` | `false` | Enables `admin_manage_person`: instance roles, board managers, and minting or revoking API keys. Even when on, the server refuses to change its own account's role, grant instance `admin`, or create accounts. |
 | `PLANKA_ALLOW_REOPEN` | `false` | Allow `done → todo` / `done → in_progress`. By default `done` is terminal. |
 
 `PLANKA_ACT_AS` is useful when you must use a powerful account but want a
@@ -286,6 +286,32 @@ response summarises the split under `how_they_are_involved`. Mentions match on
 **user id**, not display name, so renaming a person does not break history. Set
 `include_mentions: false` to skip the comment scan — it only reads cards that
 report having comments, so it is usually a handful of extra requests.
+
+## API keys
+
+With `PLANKA_ALLOW_USER_ADMIN=true` **and** an instance-admin account,
+`admin_manage_person` can mint and revoke keys:
+
+```
+admin_manage_person(action="create_api_key", person="ada@example.com")
+admin_manage_person(action="revoke_api_key", person="ada@example.com")
+```
+
+Understand what this is before turning it on:
+
+* A key is a **long-lived credential that acts as that person**. Minting one for
+  someone else is, in effect, permission to impersonate them until it is revoked.
+* Planka shows the value **once**. It arrives in the tool result, which means it
+  passes through the model's context and into any transcript or MCP log the
+  client writes to disk. Treat a minted key as compromised if that transcript is
+  not trusted, and revoke it.
+* Minting **replaces** any key the account already had, so whatever was using the
+  old one stops working. The response reports `replaced_an_existing_key`.
+* The server refuses to mint or revoke a key for its own account when it is
+  authenticating with one, since that would cut off its own access mid-session.
+
+Minting keys in the Planka UI avoids the transcript problem entirely. Prefer that
+unless you specifically need it automated.
 
 ## Work handed over in comments
 
