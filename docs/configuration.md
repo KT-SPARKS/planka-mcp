@@ -4,63 +4,81 @@ Everything is read from environment variables — from a `.env` file next to the
 package, or from the `env` block of your MCP client's config. No secret is ever
 hardcoded, and `.env` is git-ignored.
 
-## Quick start — no install
+## Minimal setup
 
-`uvx` (shipped with [uv](https://docs.astral.sh/uv/)) fetches, builds and runs the
-server in one step, the way `npx` does for Node. Nothing to clone, no virtualenv,
-no `.env` file:
+Three values, no install, no clone:
 
-```bash
-uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+```json
+{
+  "mcpServers": {
+    "planka": {
+      "command": "uvx",
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.1/planka_mcp-0.1.1-py3-none-any.whl", "planka-mcp"],
+      "env": {
+        "PLANKA_BASE_URL": "https://planka.example.com",
+        "PLANKA_EMAIL": "you@example.com",
+        "PLANKA_PASSWORD": "your-password"
+      }
+    }
+  }
+}
 ```
 
-Configuration comes from the environment, so a client config is the whole setup.
-Choose one credential style.
+`uvx` (part of [uv](https://docs.astral.sh/uv/)) downloads the wheel and runs it,
+the way `npx` does for Node. Nothing else is required, and none of the variables
+below are mandatory.
 
-**Option A — API key** (Planka: user settings → API key; shown once):
+Swap the credentials for an API key if you prefer — Planka: user settings → API
+key, shown once:
+
+```json
+      "env": {
+        "PLANKA_BASE_URL": "https://planka.example.com",
+        "PLANKA_API_KEY": "your-api-key"
+      }
+```
+
+Claude Code:
 
 ```bash
 claude mcp add planka \
   --env PLANKA_BASE_URL=https://planka.example.com \
   --env PLANKA_API_KEY=your-api-key \
-  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+  -- uvx --from https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.1/planka_mcp-0.1.1-py3-none-any.whl planka-mcp
 ```
 
-**Option B — email and password** (the server logs in and refreshes on `401`):
+Check it worked by asking the agent to call `whoami`.
+
+## Windows
+
+* The desktop app spawns the command directly, so `uvx` may not resolve from
+  `PATH`. Use the full path with doubled backslashes:
+  `"command": "C:\\Users\\You\\AppData\\Local\\hermes\\bin\\uvx.exe"` — find it
+  with `where uvx`.
+* An `env` block **replaces** the process environment. That is why a
+  `git+https://...` source fails with `Git executable not found` even when git is
+  installed: uv is launched without a usable `PATH`. Installing from the wheel URL
+  needs no git. If you must use a git source, add `"PATH"` to the `env` block.
+* Config path: `%APPDATA%\Claude\claude_desktop_config.json`. Quit from the tray
+  icon and reopen; closing the window is not a restart.
+
+## Installing from source
+
+Needs git available to the process:
 
 ```bash
-claude mcp add planka \
-  --env PLANKA_BASE_URL=https://planka.example.com \
-  --env PLANKA_EMAIL=agent@example.com \
-  --env PLANKA_PASSWORD=your-password \
-  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
 ```
 
-Set one or the other; `PLANKA_API_KEY` takes precedence if both are present.
-The two are sent differently on the wire — a key goes in `X-Api-Key`, a login
-token as `Authorization: Bearer` — which the client handles for you.
-
-Pin a release for reproducibility by appending a tag:
-
-```
-git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0
-```
-
-Without `uv`, `pipx run --spec git+https://github.com/KT-SPARKS/planka-mcp planka-mcp`
-does the same thing.
-
-## From a checkout (for development)
+Development checkout:
 
 ```bash
 git clone https://github.com/KT-SPARKS/planka-mcp.git
 cd planka-mcp
 uv venv && uv pip install -e .
-cp .env.example .env      # fill in base URL + credentials
+cp .env.example .env      # a .env file is only read in this mode
 .venv/bin/planka-mcp
 ```
-
-A `.env` file is only read in this mode; with `uvx` pass the values as `env` in
-your client config.
 
 ## Recommended setup: a dedicated agent account
 

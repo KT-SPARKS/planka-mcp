@@ -94,7 +94,7 @@ mcp = MCPServer(
     "planka-tasks",
     title="Planka task queue",
     instructions=INSTRUCTIONS,
-    version="0.1.0",
+    version="0.1.1",
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)

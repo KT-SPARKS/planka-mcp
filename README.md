@@ -165,79 +165,110 @@ labels; refusal to self-remove or self-promote.
 
 ## Setup
 
-No install needed — `uvx` fetches and runs it like `npx` does for Node. Pick one
-of the two credential styles.
-
-### Option A — API key (recommended)
-
-In Planka: user settings → API key. The key is shown once.
-
-```bash
-claude mcp add planka \
-  --env PLANKA_BASE_URL=https://planka.example.com \
-  --env PLANKA_API_KEY=your-api-key \
-  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
-```
+Nothing to install or clone. Add this to your MCP client config, fill in three
+values, restart:
 
 ```json
 {
   "mcpServers": {
     "planka": {
       "command": "uvx",
-      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0", "planka-mcp"],
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.1/planka_mcp-0.1.1-py3-none-any.whl", "planka-mcp"],
+      "env": {
+        "PLANKA_BASE_URL": "https://planka.example.com",
+        "PLANKA_EMAIL": "you@example.com",
+        "PLANKA_PASSWORD": "your-password"
+      }
+    }
+  }
+}
+```
+
+Or with an API key instead of a password (Planka: user settings → API key):
+
+```json
+      "env": {
+        "PLANKA_BASE_URL": "https://planka.example.com",
+        "PLANKA_API_KEY": "your-api-key"
+      }
+```
+
+Claude Code, one line:
+
+```bash
+claude mcp add planka --env PLANKA_BASE_URL=https://planka.example.com --env PLANKA_API_KEY=your-api-key -- uvx --from https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.1/planka_mcp-0.1.1-py3-none-any.whl planka-mcp
+```
+
+That is the whole setup. Everything below is optional.
+
+<details>
+<summary>Windows notes</summary>
+
+Two things trip up the Windows desktop app:
+
+* **`uvx` not found** — the app spawns the command directly, so give the full
+  path, with doubled backslashes:
+  `"command": "C:\\Users\\You\\AppData\\Local\\hermes\\bin\\uvx.exe"`.
+  Find it with `where uvx`.
+* **`Git executable not found`** — an `env` block replaces the process
+  environment, so a `git+https://...` source cannot run git. The wheel URL above
+  needs no git and avoids this entirely. If you do want to install from source on
+  Windows, add `"PATH"` to the `env` block.
+
+Config lives at `%APPDATA%\Claude\claude_desktop_config.json`. Quit from the
+tray icon and reopen — closing the window does not restart the app.
+
+</details>
+
+<details>
+<summary>Locking it down (recommended for unattended agents)</summary>
+
+The setup above gives the agent whatever the account can do. To narrow it:
+
+```json
       "env": {
         "PLANKA_BASE_URL": "https://planka.example.com",
         "PLANKA_API_KEY": "your-api-key",
         "PLANKA_BOARD_IDS": "1234567890123456789",
         "PLANKA_ACT_AS": "worker"
       }
-    }
-  }
-}
 ```
 
-### Option B — email and password
+* `PLANKA_BOARD_IDS` — every tool refuses anything outside these projects.
+* `PLANKA_ACT_AS` — ceiling of `guest`, `worker`, `editor` or `admin`, applied on
+  top of the account's real rights.
 
-No key needed; the server logs in and refreshes the token itself on `401`.
+Better still, create a dedicated Planka user for the agent, add it to just the
+boards it should touch as a `worker`, and use its API key — rather than pointing
+this at an admin account.
+
+</details>
+
+<details>
+<summary>Pinning, source installs and development</summary>
+
+Release wheels are on the
+[releases page](https://github.com/KT-SPARKS/planka-mcp/releases); swap the URL
+to pin an older one. To run from source (needs git):
 
 ```bash
-claude mcp add planka \
-  --env PLANKA_BASE_URL=https://planka.example.com \
-  --env PLANKA_EMAIL=agent@example.com \
-  --env PLANKA_PASSWORD=your-password \
-  -- uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
+uvx --from git+https://github.com/KT-SPARKS/planka-mcp planka-mcp
 ```
 
-```json
-{
-  "mcpServers": {
-    "planka": {
-      "command": "uvx",
-      "args": ["--from", "git+https://github.com/KT-SPARKS/planka-mcp@v0.1.0", "planka-mcp"],
-      "env": {
-        "PLANKA_BASE_URL": "https://planka.example.com",
-        "PLANKA_EMAIL": "agent@example.com",
-        "PLANKA_PASSWORD": "your-password",
-        "PLANKA_BOARD_IDS": "1234567890123456789",
-        "PLANKA_ACT_AS": "worker"
-      }
-    }
-  }
-}
+For development:
+
+```bash
+git clone https://github.com/KT-SPARKS/planka-mcp.git
+cd planka-mcp
+uv venv && uv pip install -e .
+cp .env.example .env       # only read in this mode
+.venv/bin/planka-mcp
 ```
 
-Set one style or the other, not both — `PLANKA_API_KEY` wins if present. A key is
-preferable because it can be revoked without changing the account password, and
-it never puts a reusable login credential in a config file.
+</details>
 
-Recommended either way: create a dedicated Planka user for the agent and add it
-to the boards it should touch as a `worker` (or `editor`), rather than pointing
-this at your own admin account. `PLANKA_BOARD_IDS` hard-scopes it;
-`PLANKA_ACT_AS` caps what it may do.
-
-**Full configuration reference — every environment variable, status mapping,
-development checkout, HTTP transport — is in
-[docs/configuration.md](docs/configuration.md).**
+**Full configuration reference** — every environment variable, status mapping,
+HTTP transport — is in [docs/configuration.md](docs/configuration.md).
 
 ## Notes on the live API
 
