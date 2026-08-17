@@ -28,6 +28,8 @@ from .tools_author import (  # noqa: F401
     update_task_details,
 )
 from .tools_manage import (  # noqa: F401
+    copy_project_structure,
+    create_board,
     create_list,
     create_project,
     delete_list,

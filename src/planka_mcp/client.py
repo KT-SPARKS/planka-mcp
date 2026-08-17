@@ -378,6 +378,17 @@ class PlankaClient:
             allow_status=(404,),
         )
 
+    async def create_container(self, name: str, container_type: str = "shared") -> dict[str, Any]:
+        """Create a Planka *project* - the container the user calls a board.
+
+        `type` is create-only: `private` carries an owner and accepts exactly one
+        manager, `shared` accepts many. Requires an admin or projectOwner account.
+        """
+        _, body = await self.request(
+            "POST", "/projects", json_body={"name": name, "type": container_type}
+        )
+        return body.get("item") or {}
+
     async def create_board(
         self, project_id: str, name: str, position: float, board_type: str = "project"
     ) -> dict[str, Any]:

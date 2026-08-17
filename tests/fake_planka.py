@@ -263,6 +263,10 @@ class FakePlanka:
             if not (cl["cardId"] == card_id and cl["labelId"] == label_id)
         ]
 
+    async def create_container(self, name, container_type="shared"):
+        self.calls.append(f"create_container:{name}:{container_type}")
+        return {"id": f"container-{len(self.calls)}", "name": name}
+
     async def create_board(self, project_id, name, position, board_type="project"):
         return {"id": f"board-{position}", "projectId": project_id, "name": name,
                 "type": board_type}

@@ -81,6 +81,11 @@ Managing a project:
 * `create_list`, `update_list`, `delete_list` and `manage_labels` shape the
   project. Retire a stage by setting its type to `inactive`; deletion only ever
   applies to something empty and unused.
+* To start something new: `create_board` makes a container, `create_project`
+  makes a tab inside one. When an existing project is the template, use
+  `copy_project_structure` rather than retyping its columns - it carries each
+  column's type across, which naming cannot, and can bring labels and members
+  too. It copies structure only, never cards.
 * Anything placed in a list of type `closed` is marked finished by Planka.
 
 People:
@@ -113,7 +118,7 @@ mcp = MCPServer(
     "planka-tasks",
     title="Planka task queue",
     instructions=INSTRUCTIONS,
-    version="0.1.5",
+    version="0.2.0",
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)

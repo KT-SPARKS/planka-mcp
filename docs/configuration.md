@@ -313,6 +313,29 @@ Understand what this is before turning it on:
 Minting keys in the Planka UI avoids the transcript problem entirely. Prefer that
 unless you specifically need it automated.
 
+## Starting a new project
+
+`create_board` creates a container (needs an `admin` or `projectOwner` account);
+`create_project` creates a tab inside one, with its workflow columns.
+
+When an existing project is the template, clone it rather than retyping the
+column names:
+
+```
+copy_project_structure(source_project_id="...", name="Q3 Rollout",
+                       include_labels=true, include_members=false)
+```
+
+This matters because **a column's name is not its behaviour**. A list carries a
+type — `active`, `waiting`, `inactive` or `closed` — and Planka marks every card
+dropped into a `closed` list as finished. Real boards often keep a `Done` column
+of type `active`, so recreating it by name alone silently changes how the board
+works. Copying carries the types across; `create_project` also accepts
+`{name, type}` entries if you want to state them outright.
+
+Planka's own system lists (`inbox`, `recurring`, `archive`, `trash`) are skipped —
+the new project gets its own. **No cards are ever copied.**
+
 ## Work handed over in comments
 
 A common habit is to hand a task over by writing a comment:

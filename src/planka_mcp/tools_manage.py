@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Annotated, Any
 
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from .app import (
     READ_ONLY,
@@ -25,7 +25,22 @@ from .app import (
 )
 from .client import PlankaError
 from .domain import LIST_TYPES, TODO, BoardView, next_position
-from .roles import AUTHOR, STRUCTURE
+from .roles import AUTHOR, PEOPLE, STRUCTURE
+
+
+class Stage(BaseModel):
+    """One workflow column, when the caller wants to state the type outright."""
+
+    name: str = Field(description="Column name, e.g. 'Ready for QA'.")
+    type: str = Field(
+        default="active",
+        description="active (work stage) | waiting (on hold) | inactive (out of "
+                    "flow) | closed (Planka marks cards here as finished).",
+    )
+
+
+# Lists Planka creates per board. Never copied, never treated as work stages.
+SYSTEM_LIST_TYPES = ("inbox", "recurring", "archive", "trash")
 
 LABEL_COLORS = (
     "berry-red", "pumpkin-orange", "lagoon-blue", "pink-tulip", "light-mud",
@@ -136,13 +151,18 @@ async def create_project(
     board_id: Annotated[str, Field(description="Board (container) to create it in.")],
     name: Annotated[str, Field(description="Name of the new project (tab).")],
     lists: Annotated[
-        list[str] | None,
-        Field(description="Workflow stages to create, in order. "
-                          "Defaults to To Do / In Progress / Review / Done."),
+        list[Stage] | list[str] | None,
+        Field(description="Workflow stages in order. Either plain names, or "
+                          "{name, type} to set each type outright. Plain names are "
+                          "typed by convention: a 'done'-style name becomes a closed "
+                          "list. Defaults to To Do / In Progress / Review / Done."),
     ] = None,
 ) -> dict[str, Any]:
     """Create a new project (tab) inside a board, pre-populated with workflow
-    lists so it is immediately usable. Requires admin rights on that board."""
+    lists so it is immediately usable. Requires admin rights on that board.
+
+    To reproduce an existing project's layout, use `copy_project_structure`
+    instead - it carries the exact list types across, which naming alone cannot."""
     config, client = await _get_client()
     graph = await client.project_graph()
     managers = {
@@ -165,9 +185,22 @@ async def create_project(
     stages = lists or ["To Do", "In Progress", "Review", "Done"]
     made = []
     for i, stage in enumerate(stages):
+        if isinstance(stage, Stage):
+            stage_name, stage_type = stage.name, stage.type
+        elif isinstance(stage, dict):
+            stage_name, stage_type = str(stage.get("name")), stage.get("type") or "active"
+        else:
+            stage_name = str(stage)
+            stage_type = (
+                "closed"
+                if stage_name.strip().lower() in ("done", "closed", "shipped", "completed")
+                else "active"
+            )
+        if stage_type not in LIST_TYPES:
+            return {"ok": False, "error": f"'{stage_type}' is not a list type; "
+                                          f"use one of {list(LIST_TYPES)}."}
         created = await client.create_list(
-            str(board["id"]), stage, (i + 1) * 65536,
-            "closed" if stage.strip().lower() in ("done", "closed", "shipped") else "active",
+            str(board["id"]), stage_name, (i + 1) * 65536, stage_type
         )
         made.append({"list_id": str(created.get("id")), "name": created.get("name"),
                      "type": created.get("type")})
@@ -505,3 +538,164 @@ async def move_task(
         if (destination.get("type") == "closed")
         else None,
     }
+
+
+@mcp.tool(annotations=WRITE)
+@tool_result
+async def create_board(
+    name: Annotated[str, Field(description="Name of the new board (container).")],
+    shared: Annotated[
+        bool,
+        Field(description="Shared boards accept several managers, which is what a "
+                          "team wants. A private board has a single owner and cannot "
+                          "take co-managers later without being converted."),
+    ] = True,
+) -> dict[str, Any]:
+    """Create a board - the container that holds projects (tabs).
+
+    Needs an `admin` or `projectOwner` account; Planka refuses project creation
+    for anyone else. Create the board first, then fill it with `create_project`
+    or `copy_project_structure`."""
+    config, client = await _get_client()
+    me = await client.me()
+    if me.get("role") not in ("admin", "projectOwner"):
+        return {
+            "ok": False,
+            "result": "not_permitted",
+            "reason": f"Creating a board needs an admin or projectOwner account; "
+                      f"this one is '{me.get('role')}'.",
+            "next_step": "Ask an administrator to create it, or to raise this "
+                         "account to projectOwner.",
+        }
+
+    container = await client.create_container(name.strip(), "shared" if shared else "private")
+    return {
+        "ok": True,
+        "result": "created",
+        "board_id": str(container.get("id")),
+        "name": container.get("name"),
+        "shared": shared,
+        "next_step": "Add projects to it with create_project or copy_project_structure.",
+    }
+
+
+@mcp.tool(annotations=WRITE)
+@tool_result
+async def copy_project_structure(
+    source_project_id: Annotated[
+        str, Field(description="Project (tab) whose layout to copy.")
+    ],
+    name: Annotated[str, Field(description="Name for the new project.")],
+    board_id: Annotated[
+        str | None,
+        Field(description="Board (container) to create it in. Defaults to the "
+                          "source's own board."),
+    ] = None,
+    include_labels: Annotated[
+        bool, Field(description="Recreate the source's labels. On by default.")
+    ] = True,
+    include_members: Annotated[
+        bool,
+        Field(description="Give the source's members the same roles on the copy. "
+                          "Off by default, and needs membership rights."),
+    ] = False,
+) -> dict[str, Any]:
+    """Clone a project's layout: its columns with their exact types and order, and
+    optionally its labels and members. **No cards are copied** - this produces an
+    empty project shaped like the original.
+
+    Prefer this over `create_project` when an existing project is the template.
+    Naming a column 'Done' is not the same as copying it: a list's type decides
+    whether Planka marks cards dropped there as finished, and only a copy carries
+    that across."""
+    config, client = await _get_client()
+    source = await _view(source_project_id, fresh=True)
+    target_board = board_id or source.project_id
+    if not target_board:
+        return {"ok": False, "error": "Could not tell which board to create this in; "
+                                      "pass board_id."}
+
+    graph = await client.project_graph()
+    managers = {
+        str(m.get("userId")) for m in (graph.get("included") or {}).get("projectManagers") or []
+        if str(m.get("projectId")) == target_board
+    }
+    me = await client.me()
+    if me.get("role") != "admin" and str(me.get("id")) not in managers:
+        return {"ok": False, "result": "not_permitted",
+                "reason": "Creating a project requires managing the target board."}
+
+    stages = [
+        obj for obj in sorted(source.lists.values(), key=lambda l: l.get("position") or 0)
+        if (obj.get("type") or "active") not in SYSTEM_LIST_TYPES and obj.get("name")
+    ]
+    if not stages:
+        return {"ok": False, "result": "nothing_to_copy",
+                "reason": f"'{source.board_name}' has no columns of its own to copy."}
+
+    board = await client.create_board(
+        target_board, name.strip(),
+        next_position([
+            b.get("position") for b in (graph.get("included") or {}).get("boards") or []
+            if str(b.get("projectId")) == target_board
+        ]),
+    )
+    new_id = str(board.get("id"))
+
+    copied_lists = []
+    for i, stage in enumerate(stages):
+        created = await client.create_list(
+            new_id, stage.get("name"), (i + 1) * 65536, stage.get("type") or "active"
+        )
+        copied_lists.append({"name": created.get("name"), "type": created.get("type")})
+
+    copied_labels = []
+    if include_labels:
+        for i, label in enumerate(
+            sorted(source.labels.values(), key=lambda l: l.get("position") or 0)
+        ):
+            created = await client.create_label(
+                new_id, label.get("name") or "", label.get("color") or LABEL_COLORS[0],
+                (i + 1) * 65536,
+            )
+            copied_labels.append(created.get("name"))
+
+    copied_members, member_note = [], None
+    if include_members:
+        denied = await require(new_id, PEOPLE, "copy members onto the new project")
+        if denied:
+            member_note = ("Your role cannot manage membership, so the copy was made "
+                           "without members.")
+        else:
+            my_id = str(me.get("id"))
+            for membership in source.board_memberships:
+                user_id = str(membership.get("userId"))
+                if user_id == my_id:
+                    continue  # the creator is already on it
+                await client.add_board_membership(
+                    new_id, user_id, str(membership.get("role") or "worker")
+                )
+                copied_members.append({
+                    "name": (source.users.get(user_id) or {}).get("name") or user_id,
+                    "role": membership.get("role"),
+                })
+
+    client.invalidate_board(new_id)
+    result = {
+        "ok": True,
+        "result": "copied",
+        "project_id": new_id,
+        "name": board.get("name"),
+        "copied_from": source.board_name,
+        "lists": copied_lists,
+        "labels": copied_labels,
+        "members": copied_members,
+        "cards_copied": 0,
+        "note": "Structure only - no cards were copied.",
+    }
+    skipped = len(source.lists) - len(stages)
+    if skipped:
+        result["system_lists_skipped"] = skipped
+    if member_note:
+        result["members_note"] = member_note
+    return result

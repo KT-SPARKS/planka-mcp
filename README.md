@@ -44,7 +44,9 @@ The tools speak your words, not Planka's schema:
 | Tool | Purpose |
 | --- | --- |
 | `list_boards` / `list_projects` / `get_project` | Discover containers, tabs, and your role on each |
-| `create_project` / `update_project` | New tab with workflow lists; rename |
+| `create_board` | New container, for an admin or projectOwner account |
+| `create_project` / `update_project` | New tab with workflow lists (names, or `{name, type}`); rename |
+| `copy_project_structure` | Clone a project's columns with their exact types, plus labels and members — never cards |
 | `create_list` / `update_list` / `delete_list` | Stages; retire via `inactive`; delete only when empty |
 | `manage_labels` | Create, rename, delete-if-unused |
 
@@ -160,7 +162,7 @@ double-claim — the `409` makes that path genuinely atomic.
 .venv/bin/python -m pytest tests -q
 ```
 
-65 offline tests run against an in-memory fake that reproduces Planka's
+70 offline tests run against an in-memory fake that reproduces Planka's
 semantics — assignment unique on card+user with `409` on re-insert, cards in a
 `closed` list finished by the server, board role separate from instance role.
 They cover: claim → idempotent re-claim → lost-race rollback; illegal
@@ -215,7 +217,7 @@ To pin a version instead, point at that release's wheel and drop the refresh
 flag:
 
 ```json
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.1.5/planka_mcp-0.1.5-py3-none-any.whl", "planka-mcp"]
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.2.0/planka_mcp-0.2.0-py3-none-any.whl", "planka-mcp"]
 ```
 
 That is the whole setup. Everything below is optional.

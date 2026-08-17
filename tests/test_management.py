@@ -381,3 +381,71 @@ def test_revoking_clears_the_key():
     result = run(S.admin_manage_person("revoke_api_key", person="Ada"))
     assert result["result"] == "key_revoked" and result["had_key"] is True
     assert next(u for u in fake.directory if u["id"] == ADA)["apiKeyPrefix"] is None
+
+
+# ------------------------------------------------- creating and cloning
+
+
+def test_creating_a_board_needs_an_admin_or_project_owner_account():
+    fake = setup_fake()          # boardUser
+    denied = run(S.create_board("New container"))
+    assert denied["result"] == "not_permitted"
+
+    fake.instance_role = "projectOwner"
+    allowed = run(S.create_board("New container"))
+    assert allowed["ok"] is True and allowed["shared"] is True
+
+
+def test_create_project_types_columns_by_convention_but_accepts_explicit_types():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+
+    guessed = run(S.create_project(CONTAINER, "By name", lists=["To Do", "Done"]))
+    assert [l["type"] for l in guessed["lists"]] == ["active", "closed"]
+
+    stated = run(S.create_project(CONTAINER, "By type", lists=[
+        {"name": "To Do", "type": "active"},
+        {"name": "Done", "type": "active"},        # deliberately NOT closed
+        {"name": "On hold", "type": "waiting"},
+    ]))
+    assert [l["type"] for l in stated["lists"]] == ["active", "active", "waiting"]
+
+    bad = run(S.create_project(CONTAINER, "Bad", lists=[{"name": "X", "type": "nope"}]))
+    assert bad["ok"] is False and "not a list type" in bad["error"]
+
+
+def test_copy_project_structure_preserves_types_that_naming_would_lose():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    # the source's Done column is an ordinary active list, as real boards often are
+    result = run(S.copy_project_structure(BOARD, "Clone of the board"))
+
+    assert result["ok"] is True and result["cards_copied"] == 0
+    copied = {l["name"]: l["type"] for l in result["lists"]}
+    assert copied == {"To Do": "active", "In Progress": "active", "Done": "active",
+                      "Blocked": "waiting", "Icebox": "inactive"}
+    # naming alone would have made Done a closed list
+    named = run(S.create_project(CONTAINER, "By name", lists=list(copied)))
+    assert dict((l["name"], l["type"]) for l in named["lists"])["Done"] == "closed"
+
+
+def test_copying_carries_labels_and_optionally_members_but_never_cards():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    before_cards = len(fake.cards)
+
+    result = run(S.copy_project_structure(BOARD, "With people", include_members=True))
+    assert set(result["labels"]) == {"priority: high", "size: M"}
+    assert {m["name"] for m in result["members"]} == {"Human"}   # the creator is skipped
+    assert {m["role"] for m in result["members"]} == {"worker"}
+    assert len(fake.cards) == before_cards                       # no cards cloned
+
+
+def test_copying_skips_planka_system_lists():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    fake.extra_lists.append({"id": "sys-1", "boardId": BOARD, "name": None,
+                             "type": "trash", "position": 9})
+    result = run(S.copy_project_structure(BOARD, "No system lists"))
+    assert all(l["name"] for l in result["lists"])
+    assert result["system_lists_skipped"] == 1
