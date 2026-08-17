@@ -42,6 +42,14 @@ class Stage(BaseModel):
 # Lists Planka creates per board. Never copied, never treated as work stages.
 SYSTEM_LIST_TYPES = ("inbox", "recurring", "archive", "trash")
 
+LIST_COLORS = (
+    "berry-red", "pumpkin-orange", "lagoon-blue", "pink-tulip", "light-mud",
+    "orange-peel", "bright-moss", "antique-blue", "dark-granite", "turquoise-sea",
+)
+BOARD_VIEWS = ("kanban", "grid", "list")
+CARD_TYPES = ("project", "story", "link")
+PROJECT_TYPES = ("project", "library", "collection")
+
 LABEL_COLORS = (
     "berry-red", "pumpkin-orange", "lagoon-blue", "pink-tulip", "light-mud",
     "orange-peel", "bright-moss", "antique-blue", "dark-granite", "turquoise-sea",
@@ -157,6 +165,20 @@ async def create_project(
                           "typed by convention: a 'done'-style name becomes a closed "
                           "list. Defaults to To Do / In Progress / Review / Done."),
     ] = None,
+    project_type: Annotated[
+        str,
+        Field(description="project (holds work) | library | collection. Only "
+                          "'project' projects are scanned for tasks."),
+    ] = "project",
+    default_view: Annotated[
+        str | None, Field(description="How it opens: kanban, grid or list.")
+    ] = None,
+    default_card_type: Annotated[
+        str | None, Field(description="Default kind for new tasks: project, story or link.")
+    ] = None,
+    expand_checklists: Annotated[
+        bool | None, Field(description="Show checklists expanded on the task front.")
+    ] = None,
 ) -> dict[str, Any]:
     """Create a new project (tab) inside a board, pre-populated with workflow
     lists so it is immediately usable. Requires admin rights on that board.
@@ -179,9 +201,27 @@ async def create_project(
         b for b in (graph.get("included") or {}).get("boards") or []
         if str(b.get("projectId")) == board_id
     ]
+    if project_type not in PROJECT_TYPES:
+        return {"ok": False, "error": f"project_type must be one of {list(PROJECT_TYPES)}."}
+    if default_view and default_view not in BOARD_VIEWS:
+        return {"ok": False, "error": f"default_view must be one of {list(BOARD_VIEWS)}."}
+    if default_card_type and default_card_type not in CARD_TYPES:
+        return {"ok": False, "error": f"default_card_type must be one of {list(CARD_TYPES)}."}
+
     board = await client.create_board(
-        board_id, name.strip(), next_position([b.get("position") for b in existing])
+        board_id, name.strip(), next_position([b.get("position") for b in existing]),
+        project_type,
     )
+    settings: dict[str, Any] = {}
+    if default_view:
+        settings["defaultView"] = default_view
+    if default_card_type:
+        settings["defaultCardType"] = default_card_type
+    if expand_checklists is not None:
+        settings["expandTaskListsByDefault"] = expand_checklists
+    if settings:
+        await client.update_board(str(board["id"]), settings)
+
     stages = lists or ["To Do", "In Progress", "Review", "Done"]
     made = []
     for i, stage in enumerate(stages):
@@ -205,7 +245,8 @@ async def create_project(
         made.append({"list_id": str(created.get("id")), "name": created.get("name"),
                      "type": created.get("type")})
     return {"ok": True, "result": "created", "project_id": str(board.get("id")),
-            "name": board.get("name"), "lists": made}
+            "name": board.get("name"), "type": project_type, "lists": made,
+            "settings": settings or "defaults"}
 
 
 @mcp.tool(annotations=WRITE)
@@ -216,8 +257,21 @@ async def update_project(
     default_view: Annotated[
         str | None, Field(description="Default view: kanban, grid or list.")
     ] = None,
+    default_card_type: Annotated[
+        str | None, Field(description="Default kind for new tasks: project, story or link.")
+    ] = None,
+    limit_to_default_card_type: Annotated[
+        bool | None, Field(description="Allow only the default kind of task.")
+    ] = None,
+    always_show_task_creator: Annotated[
+        bool | None, Field(description="Show who created each task on its front.")
+    ] = None,
+    expand_checklists: Annotated[
+        bool | None, Field(description="Show checklists expanded on the task front.")
+    ] = None,
 ) -> dict[str, Any]:
-    """Rename a project (tab) or change how it opens. Requires structure rights."""
+    """Rename a project (tab) or change how it behaves: default view, the kind of
+    task it creates, whether checklists open expanded. Requires structure rights."""
     denied = await require(project_id, STRUCTURE, "rename this project")
     if denied:
         return denied
@@ -225,9 +279,19 @@ async def update_project(
     if name:
         fields["name"] = name.strip()
     if default_view:
-        if default_view not in ("kanban", "grid", "list"):
-            return {"ok": False, "error": "default_view must be kanban, grid or list."}
+        if default_view not in BOARD_VIEWS:
+            return {"ok": False, "error": f"default_view must be one of {list(BOARD_VIEWS)}."}
         fields["defaultView"] = default_view
+    if default_card_type:
+        if default_card_type not in CARD_TYPES:
+            return {"ok": False, "error": f"default_card_type must be one of {list(CARD_TYPES)}."}
+        fields["defaultCardType"] = default_card_type
+    if limit_to_default_card_type is not None:
+        fields["limitCardTypesToDefaultOne"] = limit_to_default_card_type
+    if always_show_task_creator is not None:
+        fields["alwaysDisplayCardCreator"] = always_show_task_creator
+    if expand_checklists is not None:
+        fields["expandTaskListsByDefault"] = expand_checklists
     if not fields:
         return {"ok": True, "result": "nothing_to_change", "project_id": project_id}
 
@@ -250,6 +314,10 @@ async def create_list(
     ] = "active",
     after: Annotated[
         str | None, Field(description="Place it after this list (name or id).")
+    ] = None,
+    color: Annotated[
+        str | None,
+        Field(description="Column colour, e.g. berry-red, lagoon-blue, bright-moss."),
     ] = None,
 ) -> dict[str, Any]:
     """Add a workflow stage to a project. Note that Planka closes any card placed
@@ -274,10 +342,14 @@ async def create_list(
                     "lists": [l.get("name") for l in view.lists.values()]}
         position = (anchor.get("position") or 0) + 32768
 
-    created = await client.create_list(project_id, name.strip(), position, list_type)
+    if color and color not in LIST_COLORS:
+        return {"ok": False, "error": f"color must be one of {list(LIST_COLORS)}."}
+
+    created = await client.create_list(project_id, name.strip(), position, list_type, color)
     client.invalidate_board(project_id)
     return {"ok": True, "result": "created", "list_id": str(created.get("id")),
-            "name": created.get("name"), "type": created.get("type")}
+            "name": created.get("name"), "type": created.get("type"),
+            "color": created.get("color")}
 
 
 @mcp.tool(annotations=WRITE)
@@ -290,6 +362,12 @@ async def update_list(
         str | None,
         Field(description="New type: active, waiting, inactive or closed. Setting "
                           "'inactive' is how you retire a stage without deleting it."),
+    ] = None,
+    color: Annotated[str | None, Field(description="New colour for the column.")] = None,
+    after: Annotated[
+        str | None,
+        Field(description="Reorder: place this column after that one (name or id). "
+                          "Pass 'first' to move it to the front."),
     ] = None,
 ) -> dict[str, Any]:
     """Rename a list or change its type. Retiring a stage is a type change to
@@ -307,11 +385,26 @@ async def update_list(
         return {"ok": False, "error": f"No list called '{list_name_or_id}'.",
                 "lists": [l.get("name") for l in view.lists.values()]}
 
+    if color and color not in LIST_COLORS:
+        return {"ok": False, "error": f"color must be one of {list(LIST_COLORS)}."}
+
     fields: dict[str, Any] = {}
     if name:
         fields["name"] = name.strip()
     if list_type:
         fields["type"] = list_type
+    if color:
+        fields["color"] = color
+    if after:
+        if after.strip().lower() == "first":
+            lowest = min((l.get("position") or 0) for l in view.lists.values())
+            fields["position"] = lowest / 2 if lowest else 32768
+        else:
+            anchor = view.find_list(after)
+            if anchor is None:
+                return {"ok": False, "error": f"No list called '{after}' to place it after.",
+                        "lists": [l.get("name") for l in view.lists.values()]}
+            fields["position"] = (anchor.get("position") or 0) + 32768
     if not fields:
         return {"ok": True, "result": "nothing_to_change"}
 
@@ -319,6 +412,7 @@ async def update_list(
     client.invalidate_board(project_id)
     result = {"ok": True, "result": "updated", "list_id": str(target["id"]),
               "name": updated.get("name"), "type": updated.get("type"),
+              "color": updated.get("color"),
               "cards_affected": len(view.cards_in_list(str(target["id"])))}
     if list_type == "closed" and result["cards_affected"]:
         result["warning"] = (
@@ -377,6 +471,13 @@ async def manage_labels(
         list[str] | None,
         Field(description="Label names to delete. Refused if the label is on any card."),
     ] = None,
+    colors: Annotated[
+        dict[str, str] | None,
+        Field(description="Colour for labels being created or recoloured: "
+                          "{label name: colour}. Colours are Planka's own names, e.g. "
+                          "berry-red, lagoon-blue, sunny-grass. Unset ones cycle "
+                          "through the palette."),
+    ] = None,
 ) -> dict[str, Any]:
     """Create, rename or remove the labels a project uses for priority, size and
     state. A label still applied to cards is never deleted."""
@@ -391,7 +492,9 @@ async def manage_labels(
         if view.find_label(name):
             refused.append({"label": name, "why": "already exists"})
             continue
-        color = LABEL_COLORS[(len(view.labels) + i) % len(LABEL_COLORS)]
+        color = (colors or {}).get(name) or LABEL_COLORS[
+            (len(view.labels) + i) % len(LABEL_COLORS)
+        ]
         label = await client.create_label(
             project_id, name.strip(), color,
             next_position([l.get("position") for l in view.labels.values()]) + i * 65536,
@@ -404,8 +507,11 @@ async def manage_labels(
         if target is None:
             refused.append({"label": old, "why": "no such label"})
             continue
-        await client.update_label(str(target["id"]), {"name": new.strip()})
-        renamed.append({"from": old, "to": new})
+        changes: dict[str, Any] = {"name": new.strip()}
+        if (colors or {}).get(old) or (colors or {}).get(new):
+            changes["color"] = (colors or {}).get(new) or (colors or {})[old]
+        await client.update_label(str(target["id"]), changes)
+        renamed.append({"from": old, "to": new, "color": changes.get("color")})
 
     for name in delete_unused or []:
         target = view.find_label(name)
@@ -418,6 +524,16 @@ async def manage_labels(
             continue
         await client.delete_label(str(target["id"]))
         deleted.append(name)
+
+    for name, color in (colors or {}).items():
+        if any(c["name"] == name for c in created) or any(r["from"] == name for r in renamed):
+            continue
+        target = view.find_label(name)
+        if target is None:
+            refused.append({"label": name, "why": "no such label to recolour"})
+            continue
+        await client.update_label(str(target["id"]), {"color": color})
+        renamed.append({"from": name, "to": name, "color": color})
 
     client.invalidate_board(project_id)
     result = {"ok": True, "result": "labels_updated", "created": created,
@@ -550,6 +666,9 @@ async def create_board(
                           "team wants. A private board has a single owner and cannot "
                           "take co-managers later without being converted."),
     ] = True,
+    description: Annotated[
+        str | None, Field(description="What this board is for.")
+    ] = None,
 ) -> dict[str, Any]:
     """Create a board - the container that holds projects (tabs).
 
@@ -569,6 +688,8 @@ async def create_board(
         }
 
     container = await client.create_container(name.strip(), "shared" if shared else "private")
+    if description:
+        await client.update_container(str(container["id"]), {"description": description})
     return {
         "ok": True,
         "result": "created",
@@ -699,3 +820,45 @@ async def copy_project_structure(
     if member_note:
         result["members_note"] = member_note
     return result
+
+@mcp.tool(annotations=WRITE)
+@tool_result
+async def update_board(
+    board_id: Annotated[str, Field(description="Board (container) to change.")],
+    name: Annotated[str | None, Field(description="New name.")] = None,
+    description: Annotated[str | None, Field(description="What this board is for.")] = None,
+    hidden: Annotated[
+        bool | None, Field(description="Hide it from the boards list without deleting it.")
+    ] = None,
+    favorite: Annotated[
+        bool | None, Field(description="Mark it a favourite for this account.")
+    ] = None,
+) -> dict[str, Any]:
+    """Rename a board (container), describe it, hide it or favourite it. Requires
+    managing that board - instance admin, or one of its managers."""
+    config, client = await _get_client()
+    graph = await client.project_graph()
+    managers = {
+        str(m.get("userId")) for m in (graph.get("included") or {}).get("projectManagers") or []
+        if str(m.get("projectId")) == board_id
+    }
+    me = await client.me()
+    if me.get("role") != "admin" and str(me.get("id")) not in managers:
+        return {"ok": False, "result": "not_permitted",
+                "reason": "Changing a board requires managing it."}
+
+    fields: dict[str, Any] = {}
+    if name:
+        fields["name"] = name.strip()
+    if description is not None:
+        fields["description"] = description
+    if hidden is not None:
+        fields["isHidden"] = hidden
+    if favorite is not None:
+        fields["isFavorite"] = favorite
+    if not fields:
+        return {"ok": True, "result": "nothing_to_change", "board_id": board_id}
+
+    updated = await client.update_container(board_id, fields)
+    return {"ok": True, "result": "updated", "board_id": board_id,
+            "name": updated.get("name"), "changed": sorted(fields)}

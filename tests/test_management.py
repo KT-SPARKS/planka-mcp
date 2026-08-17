@@ -449,3 +449,90 @@ def test_copying_skips_planka_system_lists():
     result = run(S.copy_project_structure(BOARD, "No system lists"))
     assert all(l["name"] for l in result["lists"])
     assert result["system_lists_skipped"] == 1
+
+
+# ------------------------------------------------- full parameter coverage
+
+
+def test_create_list_accepts_a_colour_and_rejects_a_bad_one():
+    fake = setup_fake()
+    ok = run(S.create_list(BOARD, "Ready for QA", color="lagoon-blue"))
+    assert ok["color"] == "lagoon-blue"
+    bad = run(S.create_list(BOARD, "Nope", color="octarine"))
+    assert bad["ok"] is False and "color must be" in bad["error"]
+
+
+def test_update_list_can_recolour_and_reorder():
+    setup_fake()
+    recoloured = run(S.update_list(BOARD, "To Do", color="berry-red"))
+    assert recoloured["ok"] is True
+
+    moved = run(S.update_list(BOARD, "Icebox", after="To Do"))
+    assert moved["ok"] is True
+    first = run(S.update_list(BOARD, "Done", after="first"))
+    assert first["ok"] is True
+    missing = run(S.update_list(BOARD, "Done", after="Nowhere"))
+    assert missing["ok"] is False and "to place it after" in missing["error"]
+
+
+def test_update_project_covers_every_board_setting():
+    fake = setup_fake()
+    result = run(S.update_project(BOARD, name="Renamed", default_view="grid",
+                                  default_card_type="story",
+                                  limit_to_default_card_type=True,
+                                  always_show_task_creator=True,
+                                  expand_checklists=False))
+    assert result["ok"] is True
+    assert set(result["changed"]) == {"name", "defaultView", "defaultCardType",
+                                      "limitCardTypesToDefaultOne",
+                                      "alwaysDisplayCardCreator",
+                                      "expandTaskListsByDefault"}
+    bad = run(S.update_project(BOARD, default_card_type="epic"))
+    assert bad["ok"] is False
+
+
+def test_update_board_changes_the_container():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    result = run(S.update_board(CONTAINER, name="New name", description="why it exists",
+                                hidden=False, favorite=True))
+    assert set(result["changed"]) == {"name", "description", "isHidden", "isFavorite"}
+    assert run(S.update_board(CONTAINER))["result"] == "nothing_to_change"
+
+    setup_fake()  # boardUser, not a manager
+    assert run(S.update_board(CONTAINER, name="No"))["result"] == "not_permitted"
+
+
+def test_manage_labels_takes_explicit_colours():
+    fake = setup_fake()
+    created = run(S.manage_labels(BOARD, create=["priority: urgent"],
+                                  colors={"priority: urgent": "berry-red"}))
+    assert created["created"][0]["color"] == "berry-red"
+
+    recoloured = run(S.manage_labels(BOARD, colors={"size: M": "sunny-grass"}))
+    assert recoloured["renamed"][0] == {"from": "size: M", "to": "size: M",
+                                        "color": "sunny-grass"}
+    unknown = run(S.manage_labels(BOARD, colors={"ghost": "berry-red"}))
+    assert unknown["refused"][0]["why"] == "no such label to recolour"
+
+
+def test_a_list_colour_survives_creation_even_though_planka_ignores_it_there():
+    fake = setup_fake()
+    from planka_mcp.client import PlankaClient
+    from planka_mcp.config import Config
+
+    # the real client must follow up with a PATCH, because POST drops colour
+    calls = []
+
+    class Recorder(PlankaClient):
+        async def request(self, method, path, **kw):  # type: ignore[override]
+            calls.append((method, path, kw.get("json_body")))
+            if method == "POST":
+                return 200, {"item": {"id": "l1", "name": "X", "color": None}}
+            return 200, {"item": {"id": "l1", "name": "X", "color": "berry-red"}}
+
+    client = Recorder(Config(base_url="https://x.test", api_key="k"))
+    created = run(client.create_list("b1", "X", 1, "active", "berry-red"))
+    assert created["color"] == "berry-red"
+    assert [c[0] for c in calls] == ["POST", "PATCH"]
+    assert calls[1][2] == {"color": "berry-red"}

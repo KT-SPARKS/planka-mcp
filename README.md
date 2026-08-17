@@ -34,8 +34,8 @@ The tools speak your words, not Planka's schema:
 
 | Tool | Purpose |
 | --- | --- |
-| `create_task` / `update_task_details` | File and refine work |
-| `update_checklist` | Add steps, tick them off, reopen them |
+| `create_task` / `update_task_details` | File and refine work: title, description, deadline, kind, target column |
+| `update_checklist` | Add steps, tick, reopen, **assign items to people**, **link dependencies** |
 | `set_task_labels` | Change priority/size (both are labels in Planka) |
 | `move_task` | Move to any list, including stages outside the status flow, or to another project |
 
@@ -44,10 +44,10 @@ The tools speak your words, not Planka's schema:
 | Tool | Purpose |
 | --- | --- |
 | `list_boards` / `list_projects` / `get_project` | Discover containers, tabs, and your role on each |
-| `create_board` | New container, for an admin or projectOwner account |
+| `create_board` / `update_board` | The container: create, rename, describe, hide, favourite |
 | `create_project` / `update_project` | New tab with workflow lists (names, or `{name, type}`); rename |
 | `copy_project_structure` | Clone a project's columns with their exact types, plus labels and members — never cards |
-| `create_list` / `update_list` / `delete_list` | Stages; retire via `inactive`; delete only when empty |
+| `create_list` / `update_list` / `delete_list` | Columns: name, type, colour, reorder; retire via `inactive`; delete only when empty |
 | `manage_labels` | Create, rename, delete-if-unused |
 
 **People**
@@ -162,7 +162,7 @@ double-claim — the `409` makes that path genuinely atomic.
 .venv/bin/python -m pytest tests -q
 ```
 
-70 offline tests run against an in-memory fake that reproduces Planka's
+79 offline tests run against an in-memory fake that reproduces Planka's
 semantics — assignment unique on card+user with `409` on re-insert, cards in a
 `closed` list finished by the server, board role separate from instance role.
 They cover: claim → idempotent re-claim → lost-race rollback; illegal
@@ -217,7 +217,7 @@ To pin a version instead, point at that release's wheel and drop the refresh
 flag:
 
 ```json
-      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.2.0/planka_mcp-0.2.0-py3-none-any.whl", "planka-mcp"]
+      "args": ["--from", "https://github.com/KT-SPARKS/planka-mcp/releases/download/v0.3.0/planka_mcp-0.3.0-py3-none-any.whl", "planka-mcp"]
 ```
 
 That is the whole setup. Everything below is optional.
@@ -288,6 +288,8 @@ cp .env.example .env       # only read in this mode
 
 **Full configuration reference** — every environment variable, status mapping,
 HTTP transport — is in [docs/configuration.md](docs/configuration.md).
+**Coverage map** — every Planka endpoint and field, exposed or not and why — is in
+[docs/api-coverage.md](docs/api-coverage.md).
 
 ## Notes on the live API
 

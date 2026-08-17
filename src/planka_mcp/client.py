@@ -318,32 +318,52 @@ class PlankaClient:
         return body.get("item") or {}
 
     async def create_task(
-        self, task_list_id: str, name: str, position: float, is_completed: bool = False
+        self,
+        task_list_id: str,
+        name: str | None,
+        position: float,
+        is_completed: bool = False,
+        assignee_user_id: str | None = None,
+        linked_card_id: str | None = None,
     ) -> dict[str, Any]:
+        """A checklist item. `linkedCardId` makes it point at another card, which
+        is how Planka models a dependency; `name` is optional in that case."""
+        fields: dict[str, Any] = {"position": position, "isCompleted": is_completed}
+        if name:
+            fields["name"] = name
+        if assignee_user_id:
+            fields["assigneeUserId"] = assignee_user_id
+        if linked_card_id:
+            fields["linkedCardId"] = linked_card_id
         _, body = await self.request(
-            "POST",
-            f"/task-lists/{task_list_id}/tasks",
-            json_body={"name": name, "position": position, "isCompleted": is_completed},
+            "POST", f"/task-lists/{task_list_id}/tasks", json_body=fields
         )
         return body.get("item") or {}
 
-    async def set_task_completed(self, task_id: str, completed: bool) -> dict[str, Any]:
-        _, body = await self.request(
-            "PATCH", f"/tasks/{task_id}", json_body={"isCompleted": completed}
-        )
+    async def update_task(self, task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        _, body = await self.request("PATCH", f"/tasks/{task_id}", json_body=fields)
         return body.get("item") or {}
+
+    async def set_task_completed(self, task_id: str, completed: bool) -> dict[str, Any]:
+        return await self.update_task(task_id, {"isCompleted": completed})
 
     # ---- structure: lists, labels, boards (the user-facing "projects") ----
 
     async def create_list(
-        self, board_id: str, name: str, position: float, list_type: str = "active"
+        self,
+        board_id: str,
+        name: str,
+        position: float,
+        list_type: str = "active",
+        color: str | None = None,
     ) -> dict[str, Any]:
-        _, body = await self.request(
-            "POST",
-            f"/boards/{board_id}/lists",
-            json_body={"name": name, "position": position, "type": list_type},
-        )
-        return body.get("item") or {}
+        fields: dict[str, Any] = {"name": name, "position": position, "type": list_type}
+        _, body = await self.request("POST", f"/boards/{board_id}/lists", json_body=fields)
+        created = body.get("item") or {}
+        # `color` is not accepted on create - only PATCH takes it, so set it after.
+        if color and created.get("id"):
+            created = await self.update_list(str(created["id"]), {"color": color})
+        return created
 
     async def update_list(self, list_id: str, fields: dict[str, Any]) -> dict[str, Any]:
         _, body = await self.request("PATCH", f"/lists/{list_id}", json_body=fields)
@@ -378,15 +398,19 @@ class PlankaClient:
             allow_status=(404,),
         )
 
+    async def update_container(self, project_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        """Update a Planka *project* - the container the user calls a board."""
+        _, body = await self.request("PATCH", f"/projects/{project_id}", json_body=fields)
+        return body.get("item") or {}
+
     async def create_container(self, name: str, container_type: str = "shared") -> dict[str, Any]:
         """Create a Planka *project* - the container the user calls a board.
 
         `type` is create-only: `private` carries an owner and accepts exactly one
         manager, `shared` accepts many. Requires an admin or projectOwner account.
         """
-        _, body = await self.request(
-            "POST", "/projects", json_body={"name": name, "type": container_type}
-        )
+        fields: dict[str, Any] = {"name": name, "type": container_type}
+        _, body = await self.request("POST", "/projects", json_body=fields)
         return body.get("item") or {}
 
     async def create_board(

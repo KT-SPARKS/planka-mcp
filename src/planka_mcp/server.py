@@ -38,6 +38,7 @@ from .tools_manage import (  # noqa: F401
     list_projects,
     manage_labels,
     move_task,
+    update_board,
     set_task_labels,
     update_list,
     update_project,

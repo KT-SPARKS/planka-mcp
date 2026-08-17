@@ -76,10 +76,12 @@ Managing a project:
 * `list_projects` / `get_project` show structure, labels, members and the role
   you hold. Check `get_project` before changing anything.
 * `create_task`, `update_task_details`, `set_task_labels`, `update_checklist` and
-  `move_task` cover task content. Priority and size are labels, so changing
+  `move_task` cover task content - including renaming, the kind of task, which
+  column it lands in, giving checklist items an owner, and recording that one
+  task waits for another. Priority and size are labels, so changing
   priority means changing labels.
 * `create_list`, `update_list`, `delete_list` and `manage_labels` shape the
-  project. Retire a stage by setting its type to `inactive`; deletion only ever
+  project - name, type, colour and order for columns, colours for labels. Retire a stage by setting its type to `inactive`; deletion only ever
   applies to something empty and unused.
 * To start something new: `create_board` makes a container, `create_project`
   makes a tab inside one. When an existing project is the template, use
@@ -118,7 +120,7 @@ mcp = MCPServer(
     "planka-tasks",
     title="Planka task queue",
     instructions=INSTRUCTIONS,
-    version="0.2.0",
+    version="0.3.0",
 )
 
 READ_ONLY = ToolAnnotations(readOnlyHint=True, destructiveHint=False, openWorldHint=True)

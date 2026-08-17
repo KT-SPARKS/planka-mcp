@@ -430,3 +430,86 @@ def test_find_tasks_reports_every_way_a_person_is_involved():
     assert task["matched_by"] == ["assigned to the task", "assigned a checklist item",
                                   "mentioned in a comment"]
     assert task["their_checklist_items"] == [{"name": "write it", "done": True}]
+
+
+# ---------------------------------------------- full parameter coverage
+
+
+def test_a_task_can_be_renamed_retyped_and_have_its_deadline_settled():
+    fake = setup_fake()
+    result = run(S.update_task_details("c1", title="Clearer title", task_type="story",
+                                       due_date="2026-09-01T10:00:00Z", due_date_met=True))
+    assert result["ok"] is True
+    assert set(result["changed"]) == {"name", "type", "dueDate", "isDueCompleted"}
+    assert fake.cards["c1"]["name"] == "Clearer title"
+    assert fake.cards["c1"]["type"] == "story"
+    assert fake.cards["c1"]["isDueCompleted"] is True
+
+    bad = run(S.update_task_details("c1", task_type="epic"))
+    assert bad["ok"] is False and "project, story or link" in bad["error"]
+
+
+def test_create_task_chooses_its_kind_and_its_stage():
+    fake = setup_fake()
+    story = run(S.create_task("A story", board_id=BOARD, task_type="story"))
+    assert story["type"] == "story" and fake.cards[story["task_id"]]["type"] == "story"
+
+    parked = run(S.create_task("Parked", board_id=BOARD, into_list="Icebox"))
+    assert parked["list"] == "Icebox" and parked["status"] == "not a work stage"
+
+    nowhere = run(S.create_task("Nowhere", board_id=BOARD, into_list="Atlantis"))
+    assert nowhere["ok"] is False and "No list called" in nowhere["error"]
+
+    bad = run(S.create_task("Bad kind", board_id=BOARD, task_type="epic"))
+    assert bad["ok"] is False
+
+
+def test_checklist_items_can_be_given_an_owner():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    run(S.claim_task("c1"))
+    run(S.update_checklist("c1", add_items=["write it", "test it"]))
+
+    result = run(S.update_checklist("c1", assign_items={"write it": "Ada"}))
+    assert result["assigned"][0]["name"] == "Ada Hopper"
+    assert next(t for t in fake.tasks if t["name"] == "write it")["assigneeUserId"] == ADA
+
+    vague = run(S.update_checklist("c1", assign_items={"test it": "Hopper"}))
+    assert vague["assigned"][0]["why"] == "no single match"
+    assert len(vague["assigned"][0]["candidates"]) == 2
+
+    ghost = run(S.update_checklist("c1", assign_items={"nothing": "Ada"}))
+    assert ghost["items_not_found"] == ["nothing"]
+
+
+def test_a_task_can_be_made_to_depend_on_another():
+    fake = setup_fake()
+    run(S.claim_task("c1"))
+    result = run(S.update_checklist("c1", depends_on_tasks=["c2"]))   # c2 is unfinished
+    assert result["depends_on"] == [{"task_id": "c2", "linked": True}]
+    assert any(t.get("linkedCardId") == "c2" for t in fake.tasks)
+
+    # the dependency shows up as something the task is waiting on
+    detail = run(S.get_task("c1"))
+    assert detail["task"]["waiting_on"][0]["card_id"] == "c2"
+
+    # a link to already-finished work is not reported as blocking
+    run(S.update_checklist("c1", depends_on_tasks=["c3"]))            # c3 is done
+    assert [w["card_id"] for w in run(S.get_task("c1"))["task"]["waiting_on"]] == ["c2"]
+    # and it is not counted as checklist work
+    assert detail["task"]["subtasks"]["total"] == 0
+
+    itself = run(S.update_checklist("c1", depends_on_tasks=["c1"]))
+    assert itself["depends_on"][0]["why"] == "a task cannot depend on itself"
+
+
+def test_a_checklist_item_can_be_added_and_assigned_in_one_call():
+    fake = setup_fake()
+    fake.instance_role = "admin"
+    run(S.claim_task("c1"))
+    result = run(S.update_checklist("c1", add_items=["fresh step"],
+                                    assign_items={"fresh step": "Ada"}))
+    assert result["added"] == ["fresh step"]
+    assert result["assigned"][0]["name"] == "Ada Hopper"
+    assert "items_not_found" not in result
+    assert next(t for t in fake.tasks if t["name"] == "fresh step")["assigneeUserId"] == ADA

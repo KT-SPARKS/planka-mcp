@@ -63,6 +63,16 @@ async def create_task(
     checklist: Annotated[
         list[str] | None, Field(description="Optional checklist items for the new task.")
     ] = None,
+    task_type: Annotated[
+        str,
+        Field(description="project (ordinary work) | story (user story) | link "
+                          "(a pointer to something elsewhere)."),
+    ] = "project",
+    into_list: Annotated[
+        str | None,
+        Field(description="Land it in this list, by name or id, instead of the "
+                          "project's todo stage."),
+    ] = None,
 ) -> dict[str, Any]:
     """Create a new task in the todo stage of a board - follow-up work you
     discovered, or a task you were asked to file. It lands unclaimed, so claim it
@@ -74,11 +84,22 @@ async def create_task(
         return board
     view = board
 
-    todo_list_id = view.list_of_status.get(TODO)
-    if not todo_list_id:
-        return {"ok": False, "result": "no_list_for_status",
-                "reason": f"Board '{view.board_name}' has no list mapped to 'todo'.",
-                "known_stages": sorted(view.list_of_status)}
+    if task_type not in ("project", "story", "link"):
+        return {"ok": False, "error": "task_type must be project, story or link."}
+
+    if into_list:
+        destination = view.find_list(into_list)
+        if destination is None:
+            return {"ok": False, "error": f"No list called '{into_list}' on this project.",
+                    "lists": [l.get("name") for l in view.lists.values()]}
+        todo_list_id = str(destination["id"])
+    else:
+        todo_list_id = view.list_of_status.get(TODO)
+        if not todo_list_id:
+            return {"ok": False, "result": "no_list_for_status",
+                    "reason": f"Board '{view.board_name}' has no list mapped to 'todo'.",
+                    "known_stages": sorted(view.list_of_status),
+                    "next_step": "Name a list with into_list."}
 
     if due_date and parse_due(due_date) is None:
         return {"ok": False, "error": f"Could not read due_date '{due_date}'. "
@@ -88,7 +109,8 @@ async def create_task(
         c.get("position") for c in view.cards.values()
         if str(c.get("listId")) == todo_list_id
     ]
-    fields: dict[str, Any] = {"name": title.strip(), "position": next_position(positions)}
+    fields: dict[str, Any] = {"name": title.strip(), "position": next_position(positions),
+                              "type": task_type}
     if description:
         fields["description"] = description
     if due_date:
@@ -109,7 +131,9 @@ async def create_task(
         "task_id": card_id,
         "title": card.get("name"),
         "board": view.board_name,
-        "status": TODO,
+        "status": view.status_of_list.get(todo_list_id) or "not a work stage",
+        "list": (view.lists.get(todo_list_id) or {}).get("name"),
+        "type": task_type,
         "labels_applied": applied,
         "checklist_items": len(checklist or []),
         "next_step": "Call claim_task(task_id) before working on it.",
@@ -126,6 +150,9 @@ async def create_task(
 @tool_result
 async def update_task_details(
     task_id: Annotated[str, Field(description="Task id to edit.")],
+    title: Annotated[
+        str | None, Field(description="New title. Omit to leave it alone.")
+    ] = None,
     description: Annotated[
         str | None, Field(description="Replacement description. Omit to leave it alone.")
     ] = None,
@@ -136,8 +163,15 @@ async def update_task_details(
         list[str] | None,
         Field(description="Existing board label names to add. Labels are never removed."),
     ] = None,
+    due_date_met: Annotated[
+        bool | None,
+        Field(description="Mark the deadline as met, or not, without moving the task."),
+    ] = None,
+    task_type: Annotated[
+        str | None, Field(description="Change the kind: project, story or link.")
+    ] = None,
 ) -> dict[str, Any]:
-    """Refine a task's description, deadline or labels - for example after
+    """Refine a task's title, description, deadline or labels - for example after
     investigating and learning what the work actually involves. Only tasks you
     hold, or tasks nobody has claimed, can be edited; another worker's task is
     never touched."""
@@ -150,11 +184,20 @@ async def update_task_details(
         return {"ok": False, "error": f"Could not read due_date '{due_date}'. "
                                       "Use ISO-8601, e.g. 2026-08-12T17:00:00Z."}
 
+    if task_type is not None and task_type not in ("project", "story", "link"):
+        return {"ok": False, "error": "task_type must be project, story or link."}
+
     fields: dict[str, Any] = {}
+    if title is not None:
+        fields["name"] = title.strip()
     if description is not None:
         fields["description"] = description
     if due_date is not None:
         fields["dueDate"] = due_date
+    if due_date_met is not None:
+        fields["isDueCompleted"] = due_date_met
+    if task_type is not None:
+        fields["type"] = task_type
     if fields:
         await client.patch_card(task_id, fields)
     applied, missing = await _apply_labels(client, view, task_id, labels)
@@ -186,6 +229,16 @@ async def update_checklist(
     reopen_items: Annotated[
         list[str] | None, Field(description="Checklist item names to un-tick.")
     ] = None,
+    assign_items: Annotated[
+        dict[str, str] | None,
+        Field(description="Give checklist items an owner: {item name: person}. The "
+                          "person is resolved like anywhere else, by name, email or id."),
+    ] = None,
+    depends_on_tasks: Annotated[
+        list[str] | None,
+        Field(description="Task ids this task waits for. Each becomes a linked "
+                          "checklist item, which is how Planka models a dependency."),
+    ] = None,
 ) -> dict[str, Any]:
     """Break a task into checklist steps and tick them off as you go, so progress
     is visible on the board while you work. Only tasks you hold, or unclaimed
@@ -211,7 +264,10 @@ async def update_checklist(
             task_list_id = str((await client.create_task_list(task_id, "Checklist", 65536)).get("id"))
         base = next_position([t.get("position") for t in existing])
         for i, item in enumerate(add_items):
-            await client.create_task(task_list_id, item, base + i * 65536)
+            created = await client.create_task(task_list_id, item, base + i * 65536)
+            # index it immediately, so the same call can also assign it
+            by_name[item.strip().lower()] = created
+            existing.append(created)
             added.append(item)
 
     for names, completed in ((complete_items, True), (reopen_items, False)):
@@ -224,9 +280,50 @@ async def update_checklist(
                 await client.set_task_completed(str(task["id"]), completed)
                 changed.append(name)
 
+    assigned: list[dict[str, Any]] = []
+    if assign_items:
+        from .tools_people import _match_person, _people_directory, _person_brief
+
+        directory = await _people_directory(client, view)
+        for item_name, who in assign_items.items():
+            task = by_name.get(item_name.strip().lower())
+            if task is None:
+                unmatched.append(item_name)
+                continue
+            person, candidates = _match_person(who, directory)
+            if person is None:
+                assigned.append({"item": item_name, "asked_for": who,
+                                 "why": "no single match",
+                                 "candidates": [_person_brief(c) for c in candidates][:5]})
+                continue
+            await client.update_task(str(task["id"]), {"assigneeUserId": str(person["id"])})
+            assigned.append({"item": item_name, **_person_brief(person)})
+
+    linked: list[dict[str, Any]] = []
+    if depends_on_tasks:
+        task_list_id = next(
+            (str(tl["id"]) for tl in view.task_lists.values()
+             if str(tl.get("cardId")) == task_id),
+            None,
+        )
+        if task_list_id is None:
+            task_list_id = str((await client.create_task_list(task_id, "Depends on", 131072)).get("id"))
+        base = next_position([t.get("position") for t in existing]) + 65536
+        for i, other_id in enumerate(depends_on_tasks):
+            if str(other_id) == task_id:
+                linked.append({"task_id": other_id, "why": "a task cannot depend on itself"})
+                continue
+            await client.create_task(task_list_id, None, base + i * 65536,
+                                     linked_card_id=str(other_id))
+            linked.append({"task_id": str(other_id), "linked": True})
+
     client.invalidate_board(view.board_id)
     result = {"ok": True, "result": "checklist_updated", "task_id": task_id,
               "added": added, "toggled": changed}
+    if assigned:
+        result["assigned"] = assigned
+    if linked:
+        result["depends_on"] = linked
     if unmatched:
         result["items_not_found"] = unmatched
         result["existing_items"] = [t.get("name") for t in existing]

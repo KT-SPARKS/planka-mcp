@@ -197,12 +197,22 @@ class FakePlanka:
         self.task_lists.append(tl)
         return tl
 
-    async def create_task(self, task_list_id: str, name: str, position: float,
-                          is_completed: bool = False) -> dict[str, Any]:
+    async def create_task(self, task_list_id: str, name: str | None, position: float,
+                          is_completed: bool = False, assignee_user_id: str | None = None,
+                          linked_card_id: str | None = None) -> dict[str, Any]:
         t = {"id": f"t{len(self.tasks) + 1}", "taskListId": task_list_id, "name": name,
-             "position": position, "isCompleted": is_completed}
+             "position": position, "isCompleted": is_completed,
+             "assigneeUserId": assignee_user_id, "linkedCardId": linked_card_id}
         self.tasks.append(t)
         return t
+
+    async def update_task(self, task_id: str, fields: dict[str, Any]) -> dict[str, Any]:
+        for t in self.tasks:
+            if t["id"] == task_id:
+                t.update(fields)
+                self.calls.append(f"update_task:{task_id}:{','.join(sorted(fields))}")
+                return t
+        return {}
 
     async def set_task_completed(self, task_id: str, completed: bool) -> dict[str, Any]:
         for t in self.tasks:
@@ -222,14 +232,20 @@ class FakePlanka:
         pass
 
     # ---- structure ----
-    async def create_list(self, board_id, name, position, list_type="active"):
+    async def create_list(self, board_id, name, position, list_type="active", color=None):
+        # stands in for PlankaClient, which applies colour via a follow-up PATCH
         obj = {"id": f"list-{len(self.extra_lists) + 1}", "boardId": board_id,
-               "name": name, "position": position, "type": list_type}
+               "name": name, "position": position, "type": list_type, "color": color}
         self.extra_lists.append(obj)
         return obj
 
     async def update_list(self, list_id, fields):
         for obj in self.all_lists():
+            if obj["id"] == list_id:
+                obj.update(fields)
+                return obj
+        # a list created moments ago lives in extra_lists
+        for obj in self.extra_lists:
             if obj["id"] == list_id:
                 obj.update(fields)
                 return obj
@@ -262,6 +278,10 @@ class FakePlanka:
             cl for cl in self.card_labels
             if not (cl["cardId"] == card_id and cl["labelId"] == label_id)
         ]
+
+    async def update_container(self, project_id, fields):
+        self.calls.append(f"update_container:{project_id}:{','.join(sorted(fields))}")
+        return {"id": project_id, **fields}
 
     async def create_container(self, name, container_type="shared"):
         self.calls.append(f"create_container:{name}:{container_type}")
